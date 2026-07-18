@@ -11,6 +11,38 @@
       </div>
     </header>
 
+    <!-- 搜索 + 筛选栏 -->
+    <div class="toolbar card">
+      <div class="search-wrap">
+        <el-icon class="search-icon"><Search /></el-icon>
+        <input
+          v-model="keyword"
+          class="search-input"
+          placeholder="搜索书名、简介或类型..."
+        />
+        <el-icon v-if="keyword" class="search-clear" @click="keyword = ''"><CircleClose /></el-icon>
+      </div>
+      <div class="filter-group">
+        <el-select v-model="filterGenre" placeholder="全部类型" clearable size="small" style="width: 120px">
+          <el-option v-for="g in genres" :key="g" :label="g" :value="g" />
+        </el-select>
+        <el-select v-model="filterStatus" placeholder="全部状态" clearable size="small" style="width: 120px">
+          <el-option label="草稿" value="草稿" />
+          <el-option label="连载中" value="连载中" />
+          <el-option label="已完结" value="已完结" />
+          <el-option label="暂停" value="暂停" />
+        </el-select>
+        <el-radio-group v-model="sortBy" size="small">
+          <el-radio-button label="updated">最近更新</el-radio-button>
+          <el-radio-button label="created">创建时间</el-radio-button>
+          <el-radio-button label="title">书名</el-radio-button>
+        </el-radio-group>
+      </div>
+      <div class="count-tip text-faint text-xs">
+        共 {{ filteredProjects.length }} / {{ projects.length }} 本
+      </div>
+    </div>
+
     <div v-loading="loading">
       <div v-if="projects.length === 0 && !loading" class="empty card">
         <el-icon class="empty-icon"><EditPen /></el-icon>
@@ -19,15 +51,22 @@
         <el-button type="primary" :icon="Plus" @click="openCreate" style="margin-top: 12px">创建项目</el-button>
       </div>
 
-      <div v-else class="grid grid-3">
+      <div v-else-if="filteredProjects.length === 0" class="empty card">
+        <el-icon class="empty-icon"><Search /></el-icon>
+        <h3>没有匹配的小说</h3>
+        <p class="text-muted">换个关键词试试</p>
+      </div>
+
+      <div v-else class="grid grid-4">
         <div
-          v-for="p in projects" :key="p.id"
+          v-for="p in filteredProjects" :key="p.id"
           class="project-card card"
           @click="open(p.id)"
         >
           <div class="cover" :style="{ background: coverGradient(p) }">
             <span class="cover-title">{{ p.title }}</span>
             <span class="cover-genre">{{ p.genre }}</span>
+            <span class="cover-status" :class="'status-' + statusClass(p.status)">{{ p.status }}</span>
           </div>
           <div class="card-body">
             <div class="flex justify-between items-center">
@@ -47,7 +86,7 @@
             </div>
             <p class="desc">{{ p.description || '暂无简介' }}</p>
             <div class="meta">
-              <el-tag size="small" effect="plain">{{ p.status }}</el-tag>
+              <el-tag size="small" effect="plain">{{ p.genre }}</el-tag>
               <span class="text-faint text-xs">{{ formatDate(p.updatedAt) }}</span>
             </div>
           </div>
@@ -99,16 +138,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Setting, MoreFilled, EditPen } from '@element-plus/icons-vue'
+import { Plus, Setting, MoreFilled, EditPen, Search, CircleClose } from '@element-plus/icons-vue'
 import type { Project } from '@/types'
 import * as db from '@/services/db'
 
 const router = useRouter()
 const projects = ref<Project[]>([])
 const loading = ref(false)
+
+// 搜索与筛选
+const keyword = ref('')
+const filterGenre = ref('')
+const filterStatus = ref('')
+const sortBy = ref<'updated' | 'created' | 'title'>('updated')
 
 const genres = ['玄幻', '都市', '科幻', '言情', '历史', '悬疑', '武侠', '仙侠', '游戏', '体育', '军事', '现实']
 
@@ -122,6 +167,32 @@ const form = ref({
   wordsTarget: 200000,
   template: 'blank'
 })
+
+// 过滤 + 排序后的列表
+const filteredProjects = computed(() => {
+  let list = projects.value.slice()
+  const kw = keyword.value.trim().toLowerCase()
+  if (kw) {
+    list = list.filter(p =>
+      p.title.toLowerCase().includes(kw) ||
+      (p.description || '').toLowerCase().includes(kw) ||
+      (p.genre || '').toLowerCase().includes(kw)
+    )
+  }
+  if (filterGenre.value) list = list.filter(p => p.genre === filterGenre.value)
+  if (filterStatus.value) list = list.filter(p => p.status === filterStatus.value)
+  if (sortBy.value === 'updated') list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+  else if (sortBy.value === 'created') list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+  else if (sortBy.value === 'title') list.sort((a, b) => a.title.localeCompare(b.title, 'zh-CN'))
+  return list
+})
+
+function statusClass(status: string) {
+  if (status === '连载中') return 'active'
+  if (status === '已完结') return 'done'
+  if (status === '暂停') return 'pause'
+  return 'draft'
+}
 
 onMounted(load)
 
@@ -267,46 +338,136 @@ function formatDate(ts: number) {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 28px;
+  margin-bottom: 20px;
 }
 .home-header p { margin: 6px 0 0; font-size: 13px; }
+
+/* 工具栏：搜索 + 筛选 */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.search-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 240px;
+  max-width: 360px;
+}
+.search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-3);
+  font-size: 16px;
+}
+.search-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 36px 0 36px;
+  border: 1px solid var(--border);
+  border-radius: 17px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  transition: all 0.15s;
+}
+.search-input:focus {
+  border-color: var(--primary);
+  background: var(--panel);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+.search-clear {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 16px;
+}
+.search-clear:hover { color: var(--text); }
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.count-tip {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* 项目卡片 */
 .project-card {
   cursor: pointer;
   overflow: hidden;
-  transition: transform 0.15s, box-shadow 0.15s;
+  transition: transform 0.2s, box-shadow 0.2s;
 }
 .project-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+  transform: translateY(-4px);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.12);
+}
+.project-card:hover .cover {
+  filter: brightness(1.05);
 }
 .cover {
-  height: 130px;
+  height: 200px;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
   color: white;
   position: relative;
+  transition: filter 0.2s;
+}
+.cover::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 30% 20%, rgba(255,255,255,0.15), transparent 60%);
+  pointer-events: none;
 }
 .cover-title {
-  font-size: 22px;
+  font-size: 26px;
   font-weight: 700;
-  text-shadow: 0 1px 4px rgba(0,0,0,0.2);
-  padding: 0 12px;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  padding: 0 16px;
   text-align: center;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  letter-spacing: 1px;
 }
 .cover-genre {
   font-size: 12px;
-  opacity: 0.85;
-  margin-top: 4px;
+  opacity: 0.95;
+  margin-top: 8px;
   background: rgba(255,255,255,0.25);
-  padding: 2px 10px;
-  border-radius: 10px;
+  padding: 3px 12px;
+  border-radius: 12px;
+  backdrop-filter: blur(4px);
 }
+.cover-status {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(0,0,0,0.4);
+  color: white;
+  backdrop-filter: blur(4px);
+}
+.cover-status.status-active { background: rgba(16,185,129,0.85); }
+.cover-status.status-done { background: rgba(59,130,246,0.85); }
+.cover-status.status-pause { background: rgba(245,158,11,0.85); }
+.cover-status.status-draft { background: rgba(0,0,0,0.4); }
 .card-body { padding: 14px 16px; }
 .proj-title {
   margin: 0;
@@ -332,5 +493,13 @@ function formatDate(ts: number) {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+/* 响应式：屏幕小时自动减少列数 */
+@media (max-width: 1200px) {
+  .home { padding: 20px 24px; }
+}
+@media (max-width: 900px) {
+  .filter-group { width: 100%; }
 }
 </style>
