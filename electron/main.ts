@@ -6,6 +6,7 @@ import { registerStoreIPC } from './ipc/store'
 import { registerAIIPC } from './ipc/ai'
 import { registerExportIPC } from './ipc/export'
 import { registerFileIPC } from './ipc/files'
+import { registerSearchIPC } from './ipc/search'
 import { initDB } from './lib/db'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -145,6 +146,7 @@ app.whenReady().then(async () => {
     registerAIIPC()
     registerExportIPC()
     registerFileIPC()
+    registerSearchIPC()
     console.log('[main] IPC 已注册')
   } catch (e) {
     console.error('[main] IPC 注册失败:', e)

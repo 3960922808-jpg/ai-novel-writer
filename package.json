@@ -47,6 +47,7 @@
   },
   "build": {
     "appId": "com.ainovelwriter.app",
+    "icon": "build/icon.png",
     "productName": "AI写小说",
     "directories": {
       "output": "release"

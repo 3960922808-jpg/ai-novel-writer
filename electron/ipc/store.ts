@@ -5,7 +5,8 @@ import { v4 as uuidv4 } from 'uuid'
 const COLLECTIONS = [
   'chapters', 'characters', 'locations', 'lore',
   'timeline', 'canvas', 'prompts', 'goals',
-  'truths', 'critiques', 'versions'
+  'truths', 'critiques', 'versions',
+  'skills', 'styleProfiles'
 ]
 
 export function registerStoreIPC() {
@@ -54,8 +55,8 @@ export function registerStoreIPC() {
     const db = getDB()
     const arr = (db.data as any)[collection] as any[]
     if (!arr) return []
-    if (collection === 'prompts') {
-      // 全局 + 项目级
+    // 支持全局 + 项目级
+    if (collection === 'prompts' || collection === 'skills' || collection === 'styleProfiles') {
       return arr.filter(x => x.projectId === 'global' || x.projectId === projectId)
     }
     return arr.filter(x => x.projectId === projectId)
@@ -124,8 +125,16 @@ export function registerStoreIPC() {
         fontSize: 16,
         editorFont: '思源宋体, 宋体, serif',
         autoSaveInterval: 30,
-        dataDir: ''
+        dataDir: '',
+        searchProvider: 'duckduckgo',
+        searchApiKey: ''
       }
+      await db.write()
+    }
+    // 老数据兼容：补齐新字段
+    if (db.data.settings && !('searchProvider' in db.data.settings)) {
+      db.data.settings.searchProvider = 'duckduckgo'
+      db.data.settings.searchApiKey = ''
       await db.write()
     }
     return db.data.settings

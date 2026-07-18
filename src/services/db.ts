@@ -2,13 +2,15 @@
 import type {
   Project, Chapter, Character, Location, LoreEntry,
   TimelineEvent, CanvasNode, Prompt, WritingGoal,
-  TruthFile, CritiqueRecord, ChapterVersion, AppSettings
+  TruthFile, CritiqueRecord, ChapterVersion, AppSettings,
+  Skill, StyleProfile
 } from '@/types'
 
 type Collection =
   | 'chapters' | 'characters' | 'locations' | 'lore'
   | 'timeline' | 'canvas' | 'prompts' | 'goals'
   | 'truths' | 'critiques' | 'versions'
+  | 'skills' | 'styleProfiles'
 
 const C = window.api.store
 
@@ -104,4 +106,18 @@ export const Versions = {
   list: (pid: string) => list<ChapterVersion>('versions', pid),
   save: (v: Partial<ChapterVersion> & { chapterId: string }) => save('versions', v),
   remove: (id: string) => remove('versions', id)
+}
+
+// ====== 技能 Skill ======
+export const Skills = {
+  list: (pid: string) => list<Skill>('skills', pid),
+  save: (s: Partial<Skill> & { name: string }) => save('skills', s),
+  remove: (id: string) => remove('skills', id)
+}
+
+// ====== 文风档案 StyleProfile（蒸馏产出） ======
+export const StyleProfiles = {
+  list: (pid: string) => list<StyleProfile>('styleProfiles', pid),
+  save: (s: Partial<StyleProfile> & { name: string }) => save('styleProfiles', s),
+  remove: (id: string) => remove('styleProfiles', id)
 }

@@ -52,7 +52,14 @@ const api = {
   // ====== 文件 ======
   file: {
     selectImage: () => ipcRenderer.invoke('file:select-image'),
-    readImageBase64: (filePath: string) => ipcRenderer.invoke('file:read-image', filePath)
+    readImageBase64: (filePath: string) => ipcRenderer.invoke('file:read-image', filePath),
+    selectNovel: () => ipcRenderer.invoke('file:select-novel'),
+    readNovelText: (filePath: string) => ipcRenderer.invoke('file:read-novel', filePath)
+  },
+
+  // ====== 联网搜索 ======
+  search: {
+    web: (req: any) => ipcRenderer.invoke('search:web', req)
   },
 
   // ====== 菜单事件 ======

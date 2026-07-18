@@ -120,6 +120,31 @@
       </div>
 
       <div class="card section-card">
+        <div class="section-title">联网搜索</div>
+
+        <el-form-item label="搜索引擎">
+          <el-radio-group v-model="form.searchProvider">
+            <el-radio-button label="duckduckgo">DuckDuckGo（免 Key）</el-radio-button>
+            <el-radio-button label="tavily">Tavily</el-radio-button>
+            <el-radio-button label="serper">Serper</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+
+        <el-form-item label="搜索 API Key">
+          <el-input
+            v-model="form.searchApiKey"
+            type="password"
+            show-password
+            placeholder="使用 DuckDuckGo 时可留空；Tavily/Serper 需填入对应 Key"
+          />
+          <div class="text-faint text-xs" style="margin-top: 4px">
+            Tavily：<a href="https://tavily.com" target="_blank">tavily.com</a>　
+            Serper：<a href="https://serper.dev" target="_blank">serper.dev</a>
+          </div>
+        </el-form-item>
+      </div>
+
+      <div class="card section-card">
         <div class="section-title">数据</div>
 
         <el-form-item label="自动保存间隔">
@@ -169,7 +194,9 @@ const form = reactive<AppSettings>({
   fontSize: 14,
   editorFont: '思源宋体',
   autoSaveInterval: 30,
-  dataDir: ''
+  dataDir: '',
+  searchProvider: 'duckduckgo',
+  searchApiKey: ''
 })
 
 const modelOptions = computed(() => settingsStore.availableModels())
@@ -197,6 +224,9 @@ onMounted(async () => {
 function fillForm(s: AppSettings) {
   Object.assign(form, JSON.parse(JSON.stringify(s)))
   if (!Array.isArray(form.apiKeys)) form.apiKeys = []
+  // 老数据兼容
+  if (!form.searchProvider) form.searchProvider = 'duckduckgo'
+  if (!form.searchApiKey) form.searchApiKey = ''
 }
 
 function onThemeChange() {
@@ -243,7 +273,9 @@ async function save() {
       fontSize: form.fontSize,
       editorFont: form.editorFont,
       autoSaveInterval: form.autoSaveInterval,
-      dataDir: form.dataDir
+      dataDir: form.dataDir,
+      searchProvider: form.searchProvider,
+      searchApiKey: form.searchApiKey
     })
     ElMessage.success('已保存')
   } catch (e: any) {

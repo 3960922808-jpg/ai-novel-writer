@@ -51,7 +51,8 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   EditPen, DataAnalysis, Document, Edit, User,
   Location, Collection, Timer, Connection,
-  MagicStick, Trophy, ChatLineSquare, Files, Download, Setting, Fold, Expand
+  MagicStick, Trophy, ChatLineSquare, Files, Download, Setting, Fold, Expand,
+  Search, CopyDocument
 } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { ElMessage } from 'element-plus'
@@ -73,7 +74,10 @@ const navItems = [
   { name: 'lore', label: '世界观', icon: Collection },
   { name: 'timeline', label: '时间线', icon: Timer },
   { name: 'canvas', label: '故事画布', icon: Connection },
-  { name: 'prompts', label: '提示词库', icon: MagicStick },
+  { name: 'skills', label: '技能库', icon: MagicStick },
+  { name: 'distill', label: '蒸馏文风', icon: CopyDocument },
+  { name: 'search', label: '联网搜索', icon: Search },
+  { name: 'prompts', label: '提示词库', icon: EditPen },
   { name: 'goals', label: '写作目标', icon: Trophy },
   { name: 'critics', label: 'AI 评审', icon: ChatLineSquare },
   { name: 'truth', label: '真相文件', icon: Files },

@@ -1,34 +1,38 @@
-/* ====== 全局样式 ====== */
+/* ====== 全局样式 — AI 小说写作助手 浅蓝极简主题 ====== */
 :root {
-  --bg: #f5f6f8;
-  --panel: #ffffff;
-  --panel-2: #fafafa;
-  --border: #e4e6eb;
-  --text: #1f2329;
-  --text-2: #646a73;
-  --text-3: #8f959e;
-  --primary: #6366f1;
-  --primary-light: #eef2ff;
-  --accent: #ec4899;
+  --bg: #ffffff;
+  --panel: #f8fafc;
+  --panel-2: #f1f5f9;
+  --border: #e2e8f0;
+  --text: #1e293b;
+  --text-2: #64748b;
+  --text-3: #94a3b8;
+  --primary: #5b9bd5;
+  --primary-light: #e0f2fe;
+  --primary-dark: #3b82c4;
+  --accent: #5b9bd5;
   --success: #10b981;
   --warning: #f59e0b;
   --danger: #ef4444;
-  --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+  --shadow: 0 1px 3px rgba(0,0,0,0.03), 0 2px 8px rgba(0,0,0,0.04);
   --radius: 8px;
   --radius-lg: 12px;
+  --radius-xl: 16px;
 }
 
 html.dark {
-  --bg: #1a1a1a;
-  --panel: #232323;
-  --panel-2: #1f1f1f;
-  --border: #2e2e2e;
-  --text: #e6e6e6;
-  --text-2: #a8a8a8;
-  --text-3: #777;
-  --primary: #818cf8;
-  --primary-light: #2a2a4a;
-  --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 12px rgba(0,0,0,0.4);
+  --bg: #0f172a;
+  --panel: #1e293b;
+  --panel-2: #334155;
+  --border: #334155;
+  --text: #f1f5f9;
+  --text-2: #94a3b8;
+  --text-3: #64748b;
+  --primary: #7db9e8;
+  --primary-light: #1e3a5f;
+  --primary-dark: #5b9bd5;
+  --accent: #7db9e8;
+  --shadow: 0 1px 3px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.3);
 }
 
 * { box-sizing: border-box; }
@@ -45,11 +49,11 @@ html, body, #app {
 }
 
 /* 滚动条 */
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.25); }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.2); }
 ::-webkit-scrollbar-track { background: transparent; }
-html.dark ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); }
+html.dark ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); }
 
 /* 通用类 */
 .flex { display: flex; }
@@ -72,8 +76,8 @@ html.dark ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); }
 .card {
   background: var(--panel);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
   border: 1px solid var(--border);
+  box-shadow: none;
 }
 
 /* 页面容器 */
@@ -156,7 +160,7 @@ html.dark ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); }
 .empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.4; }
 
 /* 网格 */
-.grid { display: grid; gap: 16px; }
+.grid { display: grid; gap: 12px; }
 .grid-2 { grid-template-columns: repeat(2, 1fr); }
 .grid-3 { grid-template-columns: repeat(3, 1fr); }
 .grid-4 { grid-template-columns: repeat(4, 1fr); }
@@ -165,9 +169,10 @@ html.dark ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); }
 .el-button--primary {
   --el-button-bg-color: var(--primary);
   --el-button-border-color: var(--primary);
-  --el-button-hover-bg-color: var(--primary);
-  --el-button-hover-border-color: var(--primary);
+  --el-button-hover-bg-color: var(--primary-dark);
+  --el-button-hover-border-color: var(--primary-dark);
 }
+.el-button--primary:hover { opacity: 0.9; }
 
 /* 编辑器 prose */
 .prose {

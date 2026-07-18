@@ -194,6 +194,52 @@ export interface AppSettings {
   editorFont: string
   autoSaveInterval: number
   dataDir: string
+  // 联网搜索配置
+  searchProvider: 'duckduckgo' | 'tavily' | 'serper'
+  searchApiKey: string
+}
+
+/** Skill（技能）— 比普通提示词更高级的 AI 工作流 */
+export interface Skill {
+  id: ID
+  projectId: ID | 'global' // 全局或项目级
+  name: string
+  description: string
+  category: string // 续写/润色/大纲/对话/场景/评审/蒸馏/...
+  icon: string // Element Plus 图标名
+  systemPrompt: string
+  userPrompt: string // 模板，支持 {{变量}}
+  variables: string[]
+  recommendedModel?: string
+  temperature?: number
+  maxTokens?: number
+  tags: string[]
+  isBuiltIn: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+/** 文风档案（蒸馏产出） */
+export interface StyleProfile {
+  id: ID
+  projectId: ID | 'global' // 可绑定到项目，也可作为全局档案
+  name: string
+  sourceTitle: string // 原作品名/作者
+  sourceExcerpt?: string // 摘录片段
+  // 蒸馏出的写作手法
+  summary: string // 总体评价
+  narrativePOV: string // 视角与叙事方式
+  proseStyle: string // 语言风格（用词、句式、节奏）
+  dialogueStyle: string // 对话特征
+  sceneBuilding: string // 场景建构
+  characterBuilding: string // 人物塑造
+  pacing: string // 节奏与结构
+  strengths: string // 突出优点
+  weaknesses: string // 局限
+  imitationGuide: string // 给 AI 的模仿指南（可直接作为 system prompt）
+  tags: string[]
+  createdAt: number
+  updatedAt: number
 }
 
 /** AI 消息 */
