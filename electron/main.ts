@@ -78,12 +78,26 @@ function createWindow() {
 
   // 开发模式加载 dev server，生产模式加载打包文件
   const isDev = !app.isPackaged
-  if (isDev && process.env.VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
-    mainWindow.webContents.openDevTools()
+  if (isDev) {
+    // 优先用 vite-plugin-electron 注入的 URL，回退到默认端口
+    const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173'
+    console.log('[main] 开发模式，加载:', devUrl)
+    mainWindow.loadURL(devUrl).catch(err => {
+      console.error('[main] 加载 dev server 失败:', err)
+    })
+    mainWindow.webContents.openDevTools({ mode: 'detach' })
   } else {
+    console.log('[main] 生产模式，加载 dist/index.html')
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
+
+  // 监听加载失败
+  mainWindow.webContents.on('did-fail-load', (_e, errorCode, errorDescription) => {
+    console.error('[main] 页面加载失败:', errorCode, errorDescription)
+  })
+  mainWindow.webContents.on('console-message', (_e, level, message) => {
+    console.log('[renderer]', message)
+  })
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show()
@@ -101,11 +115,21 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  await initDB()
-  registerStoreIPC()
-  registerAIIPC()
-  registerExportIPC()
-  registerFileIPC()
+  try {
+    await initDB()
+    console.log('[main] 数据库初始化成功')
+  } catch (e) {
+    console.error('[main] 数据库初始化失败:', e)
+  }
+  try {
+    registerStoreIPC()
+    registerAIIPC()
+    registerExportIPC()
+    registerFileIPC()
+    console.log('[main] IPC 已注册')
+  } catch (e) {
+    console.error('[main] IPC 注册失败:', e)
+  }
   createWindow()
 
   app.on('activate', () => {
