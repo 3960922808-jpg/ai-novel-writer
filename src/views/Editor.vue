@@ -142,13 +142,12 @@
             <el-button size="small" :icon="Upload" @click="uploadAttachment">上传文件</el-button>
             <el-button size="small" :icon="Download" @click="exportCurrent">导出</el-button>
           </div>
+          <!-- 保存作品按钮（位于上传文件/导出下方） -->
+          <button class="save-work-btn" :class="{ saving: saveStatus === 'saving' }" @click="save">
+            <el-icon v-if="saveStatus === 'saving'"><Loading /></el-icon>
+            <span>{{ saveStatus === 'saving' ? '保存中...' : '保存作品' }}</span>
+          </button>
         </div>
-
-        <!-- 保存作品悬浮按钮 -->
-        <button class="save-work-btn" :class="{ saving: saveStatus === 'saving' }" @click="save">
-          <el-icon v-if="saveStatus === 'saving'"><Loading /></el-icon>
-          <span>{{ saveStatus === 'saving' ? '保存中...' : '保存作品' }}</span>
-        </button>
       </aside>
 
       <!-- 收起按钮 -->
@@ -270,6 +269,19 @@
 
         <!-- 指令输入区 -->
         <div class="input-area">
+          <!-- 已选技能 chip -->
+          <div v-if="pendingSkill" class="skill-chip-row">
+            <el-tag
+              type="primary"
+              size="small"
+              closable
+              @close="clearPendingSkill"
+            >
+              <el-icon style="vertical-align: -2px; margin-right: 2px"><MagicStick /></el-icon>
+              {{ pendingSkill.name }}
+            </el-tag>
+            <span class="text-faint text-xs">技能已选中，输入补充说明后发送（或直接发送）</span>
+          </div>
           <textarea
             ref="inputRef"
             v-model="userInput"
@@ -415,25 +427,27 @@ const editor = useEditor({
     CharacterCount.configure({ limit: null })
   ],
   autofocus: 'end',
-  onUpdate: () => { scheduleSave() }
+  onUpdate: () => { if (!isLoading.value) scheduleSave() }
 })
 
 const wordCount = computed(() => editor.value?.storage.characterCount.characters() || 0)
 
 // 保存
 const saveStatus = ref<'idle' | 'saving' | 'saved'>('idle')
+const isLoading = ref(false) // 加载章节时禁止保存
 let saveTimer: any = null
 const saveStatusText = computed(() => ({ idle: '', saving: '保存中...', saved: '已保存' }[saveStatus.value]))
 const saveStatusClass = computed(() => ({ idle: '', saving: 'saving', saved: 'saved' }[saveStatus.value]))
 
 function scheduleSave() {
+  if (isLoading.value) return
   if (saveTimer) clearTimeout(saveTimer)
   saveStatus.value = 'saving'
-  saveTimer = setTimeout(save, 1500)
+  saveTimer = setTimeout(() => save({ silent: true }), 1500)
 }
 
-async function save() {
-  if (!editor.value || !chapter.value) return
+async function save(opts: { silent?: boolean } = {}) {
+  if (!editor.value || !chapter.value || isLoading.value) return
   saveStatus.value = 'saving'
   try {
     chapter.value.content = editor.value.getHTML()
@@ -446,7 +460,12 @@ async function save() {
     setTimeout(() => { saveStatus.value = 'idle' }, 1500)
   } catch (e: any) {
     saveStatus.value = 'idle'
-    ElMessage.error('保存失败：' + e.message)
+    // 静默保存失败不弹窗（自动保存），仅手动保存或显式请求才提示
+    if (!opts.silent) {
+      ElMessage.error('保存失败：' + e.message)
+    } else {
+      console.warn('[Editor] 自动保存失败（静默）:', e.message)
+    }
   }
 }
 
@@ -494,6 +513,7 @@ async function newChapterAfter() {
 
 async function loadChapter(id: string) {
   try {
+    isLoading.value = true
     if (!project.value) return
     const c = await db.Chapters.list(project.value.id)
     projectStore.chapters = c.sort((a, b) => a.order - b.order)
@@ -510,11 +530,16 @@ async function loadChapter(id: string) {
     // 加载技能
     skills.value = await SkillsDB.list(project.value.id)
     if (editor.value) {
+      // false 表示不触发 onUpdate，避免加载时触发保存
       editor.value.commands.setContent(target.content || '', false)
       await nextTick()
       editor.value.commands.focus('end')
     }
+    // 加载完成后再放开保存
+    await nextTick()
+    isLoading.value = false
   } catch (e: any) {
+    isLoading.value = false
     ElMessage.error('加载章节失败：' + e.message)
   }
 }
@@ -558,8 +583,27 @@ function linkCurrentChapter() {
   ElMessage.success('已关联当前章节')
 }
 
-function uploadAttachment() {
-  ElMessage.info('附件上传功能待实现')
+async function uploadAttachment() {
+  try {
+    const filePath = await window.api.file.selectNovel()
+    if (!filePath) return
+    ElMessage.info('正在读取文件...')
+    const text = await window.api.file.readNovelText(filePath)
+    if (!text || !text.trim()) {
+      ElMessage.warning('文件内容为空')
+      return
+    }
+    // 截断过长内容，避免撑爆上下文
+    const truncated = text.length > 8000 ? text.slice(0, 8000) + '\n...(内容过长已截断)' : text
+    const fileName = filePath.split(/[\\/]/).pop() || '附件'
+    linkedItems.value.push({
+      label: fileName,
+      content: truncated
+    })
+    ElMessage.success(`已添加文件：${fileName}（${text.length} 字）`)
+  } catch (e: any) {
+    ElMessage.error('添加文件失败：' + (e?.message || ''))
+  }
 }
 
 function exportCurrent() {
@@ -604,51 +648,23 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 function pickSkill(s: Skill) {
-  // 自动用上下文填充变量
-  const vars: Record<string, string> = {}
-  const ctx = buildContext()
-  const fullText = editor.value?.getText() || ''
-  const selRange = editor.value?.state.selection
-  const selText = selRange && selRange.to > selRange.from
-    ? editor.value!.state.doc.textBetween(selRange.from, selRange.to, '\n')
-    : ''
-
-  for (const v of (s.variables || [])) {
-    if (v === 'content') vars.content = selText || fullText.slice(-2000)
-    else if (v === 'context') vars.context = ctx
-    else if (v === 'genre') vars.genre = project.value?.genre || ''
-    else if (v === 'title') vars.title = project.value?.title || ''
-    else if (v === 'setup') vars.setup = project.value?.description || ''
-    else if (v === 'words') vars.words = '800'
-    else if (v === 'characters') vars.characters = projectStore.characters.map(c => c.name).join('、')
-    else if (v === 'instruction') vars.instruction = ''
-    else if (v === 'imitationGuide') vars.imitationGuide = project.value?.settings.styleSample || ''
-    else if (v === 'count') vars.count = '10'
-    else if (v === 'scene') vars.scene = ''
-    else if (v === 'emotion') vars.emotion = ''
-    else if (v === 'searchResults') vars.searchResults = ''
-    else if (v === 'excerpt') vars.excerpt = fullText.slice(0, 3000)
-    else if (v === 'topic') vars.topic = ''
-    else vars[v] = ''
-  }
-
-  // 检查是否还有未填变量
-  const missing = (s.variables || []).filter(v => !vars[v] && v !== 'instruction' && v !== 'scene' && v !== 'emotion' && v !== 'topic')
-  if (missing.length > 0) {
-    ElMessage.warning(`技能「${s.name}」需要变量：${missing.join(', ')}，请补充到输入框`)
-  }
-
-  const rendered = aiSvc.renderTemplate(s.userPrompt, vars)
-  // 把技能名 + 渲染后的内容放到输入框，让用户检查后发送
-  userInput.value = `【技能：${s.name}】\n${rendered}`
-  slashMenuVisible.value = false
-  // 标记当前选中的技能，发送时用它的 system prompt
+  // 只标记选中的技能，不把模板填入输入框
+  // 变量在发送时自动用上下文填充
   pendingSkill.value = s
+  slashMenuVisible.value = false
+  userInput.value = '' // 清空输入框（去掉 / 输入）
+  ElMessage.success(`已选择技能「${s.name}」，可直接发送或输入补充说明`)
+  // 焦点回到输入框
+  nextTick(() => inputRef.value?.focus())
+}
+
+function clearPendingSkill() {
+  pendingSkill.value = null
 }
 
 const pendingSkill = ref<Skill | null>(null)
 
-const canSend = computed(() => (userInput.value.trim() || selectedPromptId.value) && !generating.value)
+const canSend = computed(() => (userInput.value.trim() || selectedPromptId.value || pendingSkill.value) && !generating.value)
 
 function getProvider() {
   const m = aiModel.value || project.value?.settings.model || ''
@@ -664,53 +680,70 @@ async function sendChat() {
   }
 
   const userMsg = userInput.value.trim()
-  if (!userMsg) return
+  // 如果选了技能但没输入，也算有效（直接用技能模板）
+  if (!userMsg && !pendingSkill.value && !selectedPromptId.value) return
 
-  chatMessages.value.push({ role: 'user', content: userMsg })
+  // 显示给用户的消息：技能 chip + 补充说明
+  const displayMsg = pendingSkill.value
+    ? `[技能：${pendingSkill.value.name}]${userMsg ? '\n' + userMsg : ''}`
+    : userMsg
+  chatMessages.value.push({ role: 'user', content: displayMsg })
   userInput.value = ''
   slashMenuVisible.value = false
-  pendingSkill.value = null
 
   // 构造 system + user
   let sysContent = `你是一位资深小说家，擅长${project.value.genre}类型创作。请直接输出正文内容，不要写"以下是续写"等说明性文字，不要使用 markdown 代码块。文风自然流畅，避免AI味。${project.value.settings.styleSample ? '\n参考文风：' + project.value.settings.styleSample : ''}`
   let userContent = userMsg
 
-  // 如果使用了技能，从消息中剥离标记，使用技能的 system prompt
-  const skillMatch = userMsg.match(/^【技能：(.+?)】\n([\s\S]*)$/)
-  if (skillMatch) {
-    const skillName = skillMatch[1]
-    const skill = skills.value.find(s => s.name === skillName)
-    if (skill) {
-      sysContent = skill.systemPrompt || sysContent
-      userContent = skillMatch[2]
+  // 自动填充变量的辅助函数
+  const ctx = buildContext()
+  const fullText = editor.value?.getText() || ''
+  const selRange = editor.value?.state.selection
+  const selText = selRange && selRange.to > selRange.from
+    ? editor.value!.state.doc.textBetween(selRange.from, selRange.to, '\n')
+    : ''
+  const fillVars = (extra: Record<string, string> = {}): Record<string, string> => ({
+    content: selText || fullText.slice(-2000),
+    context: ctx,
+    genre: project.value?.genre || '',
+    title: project.value?.title || '',
+    setup: project.value?.description || '',
+    words: '800',
+    instruction: userMsg,
+    count: '10',
+    characters: projectStore.characters.map(c => c.name).join('、'),
+    scene: userMsg,
+    emotion: '',
+    imitationGuide: project.value?.settings.styleSample || '',
+    searchResults: '',
+    excerpt: fullText.slice(0, 3000),
+    topic: userMsg,
+    ...extra
+  })
+
+  if (pendingSkill.value) {
+    // 使用技能的 system + user 模板，自动填充变量
+    sysContent = pendingSkill.value.systemPrompt || sysContent
+    const vars = fillVars()
+    userContent = aiSvc.renderTemplate(pendingSkill.value.userPrompt, vars)
+    // 如果用户有补充输入且模板中没占位符接收，追加到末尾
+    if (userMsg && !pendingSkill.value.userPrompt.includes('{{')) {
+      userContent = userMsg
+    } else if (userMsg && pendingSkill.value.variables && !pendingSkill.value.variables.some(v => ['instruction', 'scene', 'emotion', 'topic'].includes(v))) {
+      userContent += `\n\n【用户补充说明】${userMsg}`
     }
+    pendingSkill.value = null
   } else if (selectedPromptId.value) {
     const all = [...builtinPrompts.value, ...projectPrompts.value]
     const tpl = all.find(p => p.id === selectedPromptId.value)
     if (tpl) {
-      const selRange = editor.value?.state.selection
-      const selText = selRange && selRange.to > selRange.from
-        ? editor.value!.state.doc.textBetween(selRange.from, selRange.to, '\n')
-        : ''
-      const vars: Record<string, string> = {
-        content: selText || (editor.value?.getText() || '').slice(-2000),
-        context: buildContext(),
-        genre: project.value.genre,
-        title: project.value.title,
-        setup: project.value.description,
-        words: '800',
-        instruction: userMsg,
-        count: '10',
-        characters: projectStore.characters.map(c => c.name).join('、'),
-        scene: userMsg,
-        emotion: ''
-      }
+      const vars = fillVars()
       userContent = aiSvc.renderTemplate(tpl.content, vars)
     }
   } else {
     // 普通对话：拼上上下文
     const linkedContent = linkedItems.value.map(i => i.content).join('\n\n')
-    userContent = `${userMsg}\n\n${linkedContent ? '【关联内容】\n' + linkedContent + '\n\n' : ''}【当前上下文】\n${buildContext()}`
+    userContent = `${userMsg}\n\n${linkedContent ? '【关联内容】\n' + linkedContent + '\n\n' : ''}【当前上下文】\n${ctx}`
   }
 
   generating.value = true
@@ -787,7 +820,7 @@ function runTopAction(action: string) {
   const skill = skills.value.find(s => s.category === actionMap[action] || s.name.includes(actionMap[action]))
   if (skill) {
     pendingSkill.value = skill
-    userInput.value = `【技能：${skill.name}】\n${aiSvc.renderTemplate(skill.userPrompt, { content: editor.value?.getText() || '', context: buildContext(), genre: project.value?.genre || '', title: project.value?.title || '' })}`
+    userInput.value = action === 'typo' ? '请检查文本中的错别字与 AI 痕迹' : ''
     sendChat()
   } else {
     // 回退到内置提示词
@@ -1132,23 +1165,20 @@ watch(() => route.params.chapterId, async (id) => {
 .analysis-actions .el-button { flex: 1; }
 
 .save-work-btn {
-  position: absolute;
-  bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
+  width: 100%;
+  margin-top: 10px;
   background: #1a202c;
   color: white;
   border: none;
   padding: 8px 18px;
-  border-radius: 18px;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-  z-index: 10;
 }
 .save-work-btn:hover { background: #2d3748; }
 .save-work-btn.saving { background: #718096; }
@@ -1447,6 +1477,13 @@ watch(() => route.params.chapterId, async (id) => {
   border-top: 1px solid #f1f2f5;
   padding: 10px 12px 6px;
   position: relative;
+}
+.skill-chip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
 }
 .chat-input {
   width: 100%;

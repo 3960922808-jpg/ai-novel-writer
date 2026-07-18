@@ -1,7 +1,14 @@
 <template>
   <div class="page canvas-page" v-if="project">
     <div class="page-header">
-      <h1 class="page-title">故事画布</h1>
+      <div class="title-row">
+        <h1 class="page-title">故事画布</h1>
+        <!-- 连线模式开关 -->
+        <div class="mode-switch">
+          <span class="text-faint text-xs">{{ connectMode ? '连线模式' : '正常模式' }}</span>
+          <el-switch v-model="connectMode" size="small" @change="onModeChange" />
+        </div>
+      </div>
       <div class="flex gap-2 items-center">
         <el-dropdown trigger="click" @command="addNode">
           <el-button type="primary" :icon="Plus">
@@ -23,9 +30,10 @@
     </div>
 
     <div class="canvas-wrap card">
-      <div class="canvas-area" ref="canvasRef">
+      <div class="canvas-area" ref="canvasRef" @mousemove="onCanvasMouseMove" @mouseup="onCanvasMouseUp">
         <div class="canvas-inner" :style="{ width: CANVAS_W + 'px', height: CANVAS_H + 'px' }">
           <svg class="links-svg" :width="CANVAS_W" :height="CANVAS_H">
+            <!-- 已有连线 -->
             <path
               v-for="l in linkPaths"
               :key="l.key"
@@ -35,16 +43,41 @@
               fill="none"
               :opacity="0.6"
             />
+            <!-- 拖拽中的临时连线 -->
+            <path
+              v-if="dragLine"
+              :d="dragLine"
+              stroke="#ef4444"
+              stroke-width="2"
+              stroke-dasharray="5,3"
+              fill="none"
+              opacity="0.8"
+            />
           </svg>
           <div
             v-for="node in nodes"
             :key="node.id"
             class="node"
-            :class="typeClass(node.type)"
+            :class="[typeClass(node.type), { 'connect-mode': connectMode, 'drop-target': dragFrom && dragFrom.nodeId !== node.id && hoverNodeId === node.id }]"
             :style="nodeStyle(node)"
             @mousedown.left="startDrag($event, node)"
             @dblclick="edit(node)"
+            @mouseenter="hoverNodeId = node.id"
+            @mouseleave="hoverNodeId = ''"
           >
+            <!-- 连线模式下的左右红点 -->
+            <div
+              v-if="connectMode"
+              class="node-dot dot-left"
+              @mousedown.stop="startConnect($event, node, 'left')"
+              title="拖拽连线"
+            ></div>
+            <div
+              v-if="connectMode"
+              class="node-dot dot-right"
+              @mousedown.stop="startConnect($event, node, 'right')"
+              title="拖拽连线"
+            ></div>
             <button class="node-del" title="删除" @click.stop="remove(node)">
               <el-icon><Close /></el-icon>
             </button>
@@ -57,6 +90,11 @@
           <el-icon class="empty-icon"><Connection /></el-icon>
           <p>画布还是空的</p>
           <p class="text-faint text-xs">添加场景、剧情、角色等节点开始规划你的故事</p>
+        </div>
+        <!-- 连线模式提示 -->
+        <div v-if="connectMode" class="mode-hint">
+          <el-icon><InfoFilled /></el-icon>
+          <span>连线模式：拖拽节点两侧红色圆点到其他节点即可建立连接</span>
         </div>
       </div>
     </div>
@@ -104,7 +142,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Close, Connection, ArrowDown, DocumentChecked } from '@element-plus/icons-vue'
+import { Plus, Close, Connection, ArrowDown, DocumentChecked, InfoFilled } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import * as db from '@/services/db'
 import type { CanvasNode, ID } from '@/types'
@@ -118,6 +156,12 @@ const CANVAS_H = 2000
 const nodes = ref<CanvasNode[]>([])
 const canvasRef = ref<HTMLElement | null>(null)
 const dialogVisible = ref(false)
+
+// 连线模式
+const connectMode = ref(false)
+const dragFrom = ref<{ nodeId: string; side: 'left' | 'right'; x: number; y: number } | null>(null)
+const dragLine = ref('')
+const hoverNodeId = ref('')
 
 const TYPE_COLORS: Record<CanvasNode['type'], string> = {
   scene: '#409eff',
@@ -217,9 +261,50 @@ function otherNodes(currentId?: ID) {
   return nodes.value.filter(n => n.id !== currentId)
 }
 
+function onModeChange(val: boolean) {
+  if (val) {
+    ElMessage.info('已进入连线模式：拖拽节点两侧红色圆点到其他节点建立连接')
+  } else {
+    dragFrom.value = null
+    dragLine.value = ''
+  }
+}
+
+// 获取节点中心点（相对于 canvas-inner）
+function getNodeCenter(node: CanvasNode) {
+  return {
+    x: node.x + node.width / 2,
+    y: node.y + node.height / 2
+  }
+}
+
+// 获取红点在 canvas-inner 坐标系中的位置
+function getDotPosition(node: CanvasNode, side: 'left' | 'right') {
+  return {
+    x: side === 'left' ? node.x : node.x + node.width,
+    y: node.y + node.height / 2
+  }
+}
+
+// 鼠标坐标（屏幕）转 canvas-inner 坐标
+function toCanvasCoord(clientX: number, clientY: number) {
+  const canvas = canvasRef.value
+  if (!canvas) return { x: 0, y: 0 }
+  const rect = canvas.getBoundingClientRect()
+  const scrollLeft = canvas.scrollLeft
+  const scrollTop = canvas.scrollTop
+  return {
+    x: clientX - rect.left + scrollLeft,
+    y: clientY - rect.top + scrollTop
+  }
+}
+
 function startDrag(e: MouseEvent, node: CanvasNode) {
+  // 连线模式下不拖拽节点位置（避免与连线冲突），只允许通过红点连线
+  if (connectMode.value) return
   const target = e.target as HTMLElement
   if (target.closest('.node-del')) return
+  if (target.closest('.node-dot')) return
   const startX = e.clientX - node.x
   const startY = e.clientY - node.y
   const onMove = (ev: MouseEvent) => {
@@ -237,6 +322,74 @@ function startDrag(e: MouseEvent, node: CanvasNode) {
   }
   document.addEventListener('mousemove', onMove)
   document.addEventListener('mouseup', onUp)
+}
+
+// 开始连线拖拽
+function startConnect(e: MouseEvent, node: CanvasNode, side: 'left' | 'right') {
+  e.preventDefault()
+  e.stopPropagation()
+  const dotPos = getDotPosition(node, side)
+  dragFrom.value = {
+    nodeId: node.id,
+    side,
+    x: dotPos.x,
+    y: dotPos.y
+  }
+  const start = dotPos
+  const cur = toCanvasCoord(e.clientX, e.clientY)
+  dragLine.value = `M ${start.x},${start.y} L ${cur.x},${cur.y}`
+}
+
+// 画布上移动：更新临时连线
+function onCanvasMouseMove(e: MouseEvent) {
+  if (!dragFrom.value) return
+  const fromNode = nodes.value.find(n => n.id === dragFrom.value!.nodeId)
+  if (!fromNode) return
+  const start = getDotPosition(fromNode, dragFrom.value.side)
+  const cur = toCanvasCoord(e.clientX, e.clientY)
+  // 贝塞尔曲线让连线更美观
+  const dx = Math.abs(cur.x - start.x) / 2
+  const sx = start.x
+  const sy = start.y
+  const ex = cur.x
+  const ey = cur.y
+  dragLine.value = `M ${sx},${sy} C ${sx + (dragFrom.value.side === 'right' ? dx : -dx)},${sy} ${ex + (cur.x > start.x ? -dx : dx)},${ey} ${ex},${ey}`
+}
+
+// 画布上松开：检测是否在某个节点上
+async function onCanvasMouseUp(e: MouseEvent) {
+  if (!dragFrom.value) {
+    return
+  }
+  const fromNodeId = dragFrom.value.nodeId
+  const targetId = hoverNodeId.value
+  dragFrom.value = null
+  dragLine.value = ''
+
+  if (!targetId || targetId === fromNodeId) {
+    return
+  }
+  // 建立连线
+  const fromNode = nodes.value.find(n => n.id === fromNodeId)
+  const toNode = nodes.value.find(n => n.id === targetId)
+  if (!fromNode || !toNode) return
+  // 避免重复连线
+  if (fromNode.links.includes(targetId)) {
+    ElMessage.info('已存在连接')
+    return
+  }
+  // 双向连线（任意一方有对方就算已连）
+  if (toNode.links.includes(fromNodeId)) {
+    ElMessage.info('已存在反向连接')
+    return
+  }
+  fromNode.links.push(targetId)
+  try {
+    await db.Canvas.save(fromNode)
+    ElMessage.success(`已连接：${fromNode.title} → ${toNode.title}`)
+  } catch (err: any) {
+    ElMessage.error('连线失败：' + err.message)
+  }
 }
 
 async function addNode(type: CanvasNode['type']) {
@@ -349,6 +502,16 @@ async function remove(node: CanvasNode) {
   flex-direction: column;
   overflow: hidden;
 }
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.mode-switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .canvas-wrap {
   flex: 1;
   overflow: hidden;
@@ -393,6 +556,40 @@ async function remove(node: CanvasNode) {
 }
 .node:active {
   cursor: grabbing;
+}
+/* 连线模式下节点不拖拽，鼠标改为默认 */
+.node.connect-mode {
+  cursor: default;
+}
+/* 连线模式下悬停目标高亮 */
+.node.drop-target {
+  box-shadow: 0 0 0 3px #ef4444, 0 6px 18px rgba(239, 68, 68, 0.3);
+  border-color: #ef4444 !important;
+}
+/* 红点 */
+.node-dot {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ef4444;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  cursor: crosshair;
+  z-index: 4;
+  top: 50%;
+  transform: translateY(-50%);
+  transition: transform 0.15s;
+}
+.node-dot:hover {
+  transform: translateY(-50%) scale(1.4);
+  background: #dc2626;
+}
+.dot-left {
+  left: -8px;
+}
+.dot-right {
+  right: -8px;
 }
 .node-del {
   position: absolute;
@@ -453,5 +650,23 @@ async function remove(node: CanvasNode) {
   font-size: 48px;
   margin-bottom: 12px;
   opacity: 0.4;
+}
+/* 连线模式提示条 */
+.mode-hint {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(239, 68, 68, 0.9);
+  color: white;
+  padding: 6px 14px;
+  border-radius: 16px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 10;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 </style>

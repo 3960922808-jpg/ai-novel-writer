@@ -42,8 +42,29 @@ export function registerSearchIPC() {
   })
 }
 
-/** DuckDuckGo HTML 接口（无需 API Key） */
+/** DuckDuckGo Lite 接口（无需 API Key，HTML 结构更简单稳定） */
 async function searchDuckDuckGo(query: string, max: number): Promise<SearchResult[]> {
+  // 先尝试 lite 接口（更稳定）
+  try {
+    const url = 'https://lite.duckduckgo.com/lite/?q=' + encodeURIComponent(query)
+    const resp = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+      }
+    })
+    if (!resp.ok) throw new Error(`DuckDuckGo Lite 返回 ${resp.status}`)
+    const html = await resp.text()
+    const results = parseDuckDuckGoLiteHtml(html, max)
+    if (results.length > 0) return results
+    // lite 没结果则继续尝试 html 接口
+  } catch (e) {
+    console.warn('[search] DuckDuckGo Lite 失败，回退到 html 接口:', e)
+  }
+  // 回退到 html 接口
   const url = 'https://html.duckduckgo.com/html/?q=' + encodeURIComponent(query)
   const resp = await fetch(url, {
     method: 'GET',
@@ -58,6 +79,38 @@ async function searchDuckDuckGo(query: string, max: number): Promise<SearchResul
   }
   const html = await resp.text()
   return parseDuckDuckGoHtml(html, max)
+}
+
+/** DuckDuckGo Lite 版本解析（表格结构） */
+function parseDuckDuckGoLiteHtml(html: string, max: number): SearchResult[] {
+  const results: SearchResult[] = []
+  // Lite 版结果在 <a class="result-link" href="...">title</a>
+  // 摘要在 <td class="result-snippet">snippet</td>
+  const linkRe = /<a[^>]*class="[^"]*result-link[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g
+  const snipRe = /<td[^>]*class="[^"]*result-snippet[^"]*"[^>]*>([\s\S]*?)<\/td>/g
+
+  const links: { url: string; title: string }[] = []
+  let m: RegExpExecArray | null
+  while ((m = linkRe.exec(html)) !== null) {
+    const rawUrl = decodeDuckDuckGoUrl(m[1])
+    const title = stripTags(m[2]).trim()
+    if (rawUrl && title) links.push({ url: rawUrl, title })
+  }
+
+  const snippets: string[] = []
+  while ((m = snipRe.exec(html)) !== null) {
+    snippets.push(stripTags(m[1]).trim())
+  }
+
+  for (let i = 0; i < links.length && results.length < max; i++) {
+    results.push({
+      title: links[i].title,
+      url: links[i].url,
+      snippet: snippets[i] || '',
+      source: domainOf(links[i].url) || 'duckduckgo'
+    })
+  }
+  return results
 }
 
 function parseDuckDuckGoHtml(html: string, max: number): SearchResult[] {
