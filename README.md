@@ -1,6 +1,5 @@
 # AI 写小说 · Windows 桌面版
 
-对标 GitHub [OpenWrite](https://github.com/ilrein/openwrite) 的全功能 AI 长篇小说创作工作台，基于 Electron + Vue 3。
 
 ## 🚀 快速开始（Windows）
 
