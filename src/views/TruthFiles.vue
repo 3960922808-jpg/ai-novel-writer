@@ -96,7 +96,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, reactive } from 'vue'
+import { ref, computed, reactive, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Files, Edit, MagicStick, Warning, Check,
@@ -141,33 +141,41 @@ const singleRunningKey = ref<string | null>(null)
 type AIProgress = { key: string; status: 'pending' | 'running' | 'done' | 'error' }
 const aiAllProgress = ref<AIProgress[]>([])
 
-onMounted(async () => {
-  if (!project.value) return
-  await ensureFiles()
-  await loadFiles()
-})
+watch(() => project.value?.id, (id) => {
+  if (id) {
+    ensureFiles().then(loadFiles)
+  }
+}, { immediate: true })
 
 async function ensureFiles() {
   if (!project.value) return
   const pid = project.value.id
-  const existing = await db.Truths.list(pid)
-  const existingKeys = new Set(existing.map(f => f.key))
-  const toCreate = fileMetas.filter(m => !existingKeys.has(m.key))
-  if (toCreate.length === 0) return
-  for (const m of toCreate) {
-    await db.Truths.save({
-      projectId: pid,
-      key: m.key,
-      title: m.title,
-      content: '',
-      updatedAt: 0
-    })
+  try {
+    const existing = await db.Truths.list(pid)
+    const existingKeys = new Set(existing.map(f => f.key))
+    const toCreate = fileMetas.filter(m => !existingKeys.has(m.key))
+    if (toCreate.length === 0) return
+    for (const m of toCreate) {
+      await db.Truths.save({
+        projectId: pid,
+        key: m.key,
+        title: m.title,
+        content: '',
+        updatedAt: 0
+      })
+    }
+  } catch (e: any) {
+    ElMessage.error(`初始化真相文件失败：${e?.message || e}`)
   }
 }
 
 async function loadFiles() {
   if (!project.value) return
-  files.value = await db.Truths.list(project.value.id)
+  try {
+    files.value = await db.Truths.list(project.value.id)
+  } catch (e: any) {
+    ElMessage.error(`加载真相文件失败：${e?.message || e}`)
+  }
 }
 
 function previewText(content: string): string {
@@ -196,23 +204,32 @@ function openEdit(key: string) {
 async function saveEdit() {
   if (!project.value) return
   const f = fileByKey(editForm.key)
-  if (f) {
-    f.title = editForm.title
-    f.content = editForm.content
-    f.updatedAt = Date.now()
-    await db.Truths.save(f)
-  } else {
-    const saved = await db.Truths.save({
-      projectId: project.value.id,
-      key: editForm.key,
-      title: editForm.title,
-      content: editForm.content,
-      updatedAt: Date.now()
-    })
-    files.value.push(saved)
+  try {
+    if (f) {
+      await db.Truths.save({
+        ...f,
+        title: editForm.title,
+        content: editForm.content,
+        updatedAt: Date.now()
+      })
+      f.title = editForm.title
+      f.content = editForm.content
+      f.updatedAt = Date.now()
+    } else {
+      const saved = await db.Truths.save({
+        projectId: project.value.id,
+        key: editForm.key,
+        title: editForm.title,
+        content: editForm.content,
+        updatedAt: Date.now()
+      })
+      files.value.push(saved)
+    }
+    ElMessage.success('已保存')
+    editVisible.value = false
+  } catch (e: any) {
+    ElMessage.error(`保存失败：${e?.message || e}`)
   }
-  ElMessage.success('已保存')
-  editVisible.value = false
 }
 
 async function buildContext(): Promise<{ chapterSummaries: string; charInfo: string }> {
@@ -309,6 +326,10 @@ async function aiUpdateAll() {
   const provider = settings.findProviderForModel(model)
   if (!provider?.apiKey) {
     ElMessage.warning('请先配置 API Key')
+    return
+  }
+  if (fileMetas.every(m => !fileByKey(m.key))) {
+    ElMessage.warning('文件未初始化')
     return
   }
   try {

@@ -208,7 +208,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete, Search, User, MagicStick, Check } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
@@ -245,11 +245,11 @@ const filtered = computed(() => {
   )
 })
 
-onMounted(() => {
-  if (!aiForm.value.model && models.value.length > 0) {
-    aiForm.value.model = models.value[0].model
+watch(models, (ms) => {
+  if (!aiForm.value.model && ms.length > 0) {
+    aiForm.value.model = ms[0].model
   }
-})
+}, { immediate: true })
 
 watch(() => projectStore.characters, () => {
   if (selectedId.value && !projectStore.characters.find(c => c.id === selectedId.value)) {
@@ -369,15 +369,16 @@ async function saveChar() {
 }
 
 async function removeChar() {
-  if (!current.value) return
+  const id = current.value?.id
+  if (!id) return
   try {
-    await ElMessageBox.confirm(`删除角色「${current.value.name}」？此操作不可恢复。`, '确认删除', { type: 'warning' })
+    await ElMessageBox.confirm(`删除角色「${current.value!.name}」？此操作不可恢复。`, '确认删除', { type: 'warning' })
   } catch {
     return
   }
   loading.value = true
   try {
-    await Characters.remove(current.value.id)
+    await Characters.remove(id)
     await projectStore.reloadAll()
     selectedId.value = ''
     current.value = null

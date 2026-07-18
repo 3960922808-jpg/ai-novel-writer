@@ -87,7 +87,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="save">保存</el-button>
+        <el-button type="primary" :loading="saving" @click="save">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -108,6 +108,7 @@ const events = ref<TimelineEvent[]>([])
 const filter = ref('')
 const dialogVisible = ref(false)
 const isEdit = ref(false)
+const saving = ref(false)
 
 const form = reactive<{
   id?: ID
@@ -141,7 +142,11 @@ watch(project, (p) => {
 
 async function load() {
   if (!project.value) return
-  events.value = await db.Timeline.list(project.value.id)
+  try {
+    events.value = await db.Timeline.list(project.value.id)
+  } catch (e: any) {
+    ElMessage.error('加载失败：' + e.message)
+  }
 }
 
 function chapterName(id?: ID) {
@@ -198,28 +203,43 @@ async function save() {
     ElMessage.warning('请填写事件标题')
     return
   }
-  await db.Timeline.save({
-    id: form.id,
-    projectId: project.value.id,
-    time: form.time,
-    title: form.title,
-    description: form.description,
-    chapterId: form.chapterId,
-    characterIds: form.characterIds,
-    importance: form.importance,
-    order: form.order,
-    createdAt: form.id ? (events.value.find(e => e.id === form.id)?.createdAt || Date.now()) : Date.now()
-  })
-  ElMessage.success(isEdit.value ? '已更新' : '已添加')
-  dialogVisible.value = false
-  await load()
+  saving.value = true
+  try {
+    await db.Timeline.save({
+      id: form.id,
+      projectId: project.value.id,
+      time: form.time,
+      title: form.title,
+      description: form.description,
+      chapterId: form.chapterId,
+      characterIds: form.characterIds,
+      importance: form.importance,
+      order: form.order,
+      createdAt: form.id ? (events.value.find(e => e.id === form.id)?.createdAt || Date.now()) : Date.now()
+    })
+    ElMessage.success(isEdit.value ? '已更新' : '已添加')
+    dialogVisible.value = false
+    await load()
+  } catch (e: any) {
+    ElMessage.error('保存失败：' + e.message)
+  } finally {
+    saving.value = false
+  }
 }
 
 async function remove(ev: TimelineEvent) {
-  await ElMessageBox.confirm(`删除事件《${ev.title}》？`, '确认', { type: 'warning' })
-  await db.Timeline.remove(ev.id)
-  ElMessage.success('已删除')
-  await load()
+  try {
+    await ElMessageBox.confirm(`删除事件《${ev.title}》？`, '确认', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    await db.Timeline.remove(ev.id)
+    ElMessage.success('已删除')
+    await load()
+  } catch (e: any) {
+    ElMessage.error('删除失败：' + e.message)
+  }
 }
 </script>
 

@@ -35,7 +35,7 @@
     </aside>
 
     <!-- 主区域 -->
-    <main class="main">
+    <main class="main" v-loading="loading" element-loading-text="加载项目中...">
       <router-view v-slot="{ Component }">
         <transition name="fade" mode="out-in">
           <component :is="Component" />
@@ -81,12 +81,22 @@ const navItems = [
   { name: 'project-settings', label: '项目设置', icon: Setting }
 ]
 
+const loading = ref(true)
 onMounted(async () => {
   const id = route.params.id as string
-  const ok = await projectStore.loadProject(id)
-  if (!ok) {
-    ElMessage.error('项目不存在')
+  if (!id) { router.push('/'); return }
+  try {
+    const ok = await projectStore.loadProject(id)
+    if (!ok) {
+      ElMessage.error('项目不存在')
+      router.push('/')
+    }
+  } catch (e: any) {
+    console.error(e)
+    ElMessage.error('加载项目失败：' + (e.message || ''))
     router.push('/')
+  } finally {
+    loading.value = false
   }
 })
 

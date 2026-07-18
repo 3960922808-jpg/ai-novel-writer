@@ -159,7 +159,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, reactive } from 'vue'
+import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ChatLineSquare, Delete, MagicStick, Warning, Check } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
@@ -229,11 +229,21 @@ function recordsForModel(model: string) {
   return currentResults.value.filter(r => r.model === model)
 }
 
-onMounted(async () => {
-  if (project.value) {
+async function loadHistory() {
+  if (!project.value) return
+  try {
     allRecords.value = (await db.Critiques.list(project.value.id))
       .sort((a, b) => b.createdAt - a.createdAt)
+  } catch (e: any) {
+    ElMessage.error(`加载历史评审记录失败：${e?.message || e}`)
   }
+}
+
+watch(() => project.value?.id, (id) => {
+  if (id) loadHistory()
+}, { immediate: true })
+
+onMounted(() => {
   const ms = availableModels.value.slice(0, 2).map(m => m.model)
   form.models = ms
   if (chapters.value.length > 0) {
@@ -260,25 +270,30 @@ function plainText(content: string): string {
 async function loadTruthAndCharacters() {
   if (!project.value) return { truth: '', characters: '' }
   const pid = project.value.id
-  const [truths, chars] = await Promise.all([
-    db.Truths.list(pid),
-    db.Characters.list(pid)
-  ])
-  const truth = truths.map(t => `# ${t.title}\n${t.content || '(空)'}`).join('\n\n')
-  const characters = chars.map(c => {
-    const parts = [
-      `姓名：${c.name}（${c.role}）`,
-      c.aliases?.length ? `别名：${c.aliases.join('、')}` : '',
-      c.appearance ? `外貌：${c.appearance}` : '',
-      c.personality ? `性格：${c.personality}` : '',
-      c.background ? `背景：${c.background}` : '',
-      c.abilities ? `能力：${c.abilities}` : '',
-      c.goals ? `目标：${c.goals}` : '',
-      c.arc ? `弧线：${c.arc}` : ''
-    ].filter(Boolean)
-    return `- ${parts.join('；')}`
-  }).join('\n')
-  return { truth, characters }
+  try {
+    const [truths, chars] = await Promise.all([
+      db.Truths.list(pid),
+      db.Characters.list(pid)
+    ])
+    const truth = truths.map(t => `# ${t.title}\n${t.content || '(空)'}`).join('\n\n')
+    const characters = chars.map(c => {
+      const parts = [
+        `姓名：${c.name}（${c.role}）`,
+        c.aliases?.length ? `别名：${c.aliases.join('、')}` : '',
+        c.appearance ? `外貌：${c.appearance}` : '',
+        c.personality ? `性格：${c.personality}` : '',
+        c.background ? `背景：${c.background}` : '',
+        c.abilities ? `能力：${c.abilities}` : '',
+        c.goals ? `目标：${c.goals}` : '',
+        c.arc ? `弧线：${c.arc}` : ''
+      ].filter(Boolean)
+      return `- ${parts.join('；')}`
+    }).join('\n')
+    return { truth, characters }
+  } catch (e: any) {
+    ElMessage.error(`加载真相/角色数据失败：${e?.message || e}`)
+    return { truth: '', characters: '' }
+  }
 }
 
 function parseCritiqueJSON(text: string): { summary: string; findings: CritiqueRecord['findings'] } {
@@ -324,7 +339,13 @@ async function runCritique() {
     ElMessage.warning('请先配置 API Key')
     return
   }
-  const prompts = await db.Prompts.list(project.value.id)
+  let prompts: Awaited<ReturnType<typeof db.Prompts.list>> = []
+  try {
+    prompts = await db.Prompts.list(project.value.id)
+  } catch (e: any) {
+    ElMessage.error(`加载提示词失败：${e?.message || e}`)
+    return
+  }
   const content = plainText(chapter.content)
   if (!content) {
     ElMessage.warning('该章节内容为空')
@@ -334,81 +355,89 @@ async function runCritique() {
 
   running.value = true
   dialogVisible.value = false
-  progressList.value = []
-  for (const model of form.models) {
-    for (const role of form.roles) {
-      progressList.value.push({ model, role: roleLabel(role), status: 'pending' })
-    }
-  }
-
-  const newRecords: CritiqueRecord[] = []
-  const batchTime = Date.now()
-
-  for (const model of form.models) {
-    const provider = settings.findProviderForModel(model)
-    if (!provider?.apiKey) {
+  try {
+    progressList.value = []
+    for (const model of form.models) {
       for (const role of form.roles) {
-        const idx = progressList.value.findIndex(p => p.model === model && p.role === roleLabel(role))
-        if (idx >= 0) progressList.value[idx].status = 'error'
+        progressList.value.push({ model, role: roleLabel(role), status: 'pending' })
       }
-      ElMessage.warning(`模型 ${model} 缺少 API Key，已跳过`)
-      continue
     }
-    for (const role of form.roles) {
-      const tpl = prompts.find(p => p.id === role || p.title === role)
-      const idx = progressList.value.findIndex(p => p.model === model && p.role === roleLabel(role))
-      if (!tpl) {
-        ElMessage.warning(`未找到评审提示词：${role}`)
-        if (idx >= 0) progressList.value[idx].status = 'error'
+
+    const newRecords: CritiqueRecord[] = []
+    const batchTime = Date.now()
+
+    for (const model of form.models) {
+      const provider = settings.findProviderForModel(model)
+      if (!provider?.apiKey) {
+        for (const role of form.roles) {
+          const idx = progressList.value.findIndex(p => p.model === model && p.role === roleLabel(role))
+          if (idx >= 0) progressList.value[idx].status = 'error'
+        }
+        ElMessage.warning(`模型 ${model} 缺少 API Key，已跳过`)
         continue
       }
-      if (idx >= 0) progressList.value[idx].status = 'running'
-      try {
-        const userMsg = ai.renderTemplate(tpl.content, {
-          content,
-          truth,
-          characters,
-          chapterTitle: chapter.title
-        })
-        const text = await ai.chat(ai.buildRequest({
-          baseUrl: provider.baseUrl,
-          apiKey: provider.apiKey,
-          model,
-          messages: [{ role: 'user', content: userMsg }],
-          temperature: 0.3
-        }))
-        const parsed = parseCritiqueJSON(text)
-        const saved = await db.Critiques.save({
-          projectId: project.value.id,
-          chapterId: chapter.id,
-          model,
-          role: roleLabel(role),
-          findings: parsed.findings,
-          summary: parsed.summary,
-          createdAt: batchTime
-        })
-        newRecords.push(saved)
-        if (idx >= 0) progressList.value[idx].status = 'done'
-      } catch (e: any) {
-        if (idx >= 0) progressList.value[idx].status = 'error'
-        ElMessage.error(`${model} · ${roleLabel(role)} 评审失败：${e?.message || e}`)
+      for (const role of form.roles) {
+        const tpl = prompts.find(p => p.id === role || p.title === role)
+        const idx = progressList.value.findIndex(p => p.model === model && p.role === roleLabel(role))
+        if (!tpl) {
+          ElMessage.warning(`未找到评审提示词：${role}`)
+          if (idx >= 0) progressList.value[idx].status = 'error'
+          continue
+        }
+        if (idx >= 0) progressList.value[idx].status = 'running'
+        try {
+          const userMsg = ai.renderTemplate(tpl.content, {
+            content,
+            truth,
+            characters,
+            chapterTitle: chapter.title
+          })
+          const text = await ai.chat(ai.buildRequest({
+            baseUrl: provider.baseUrl,
+            apiKey: provider.apiKey,
+            model,
+            messages: [{ role: 'user', content: userMsg }],
+            temperature: 0.3
+          }))
+          const parsed = parseCritiqueJSON(text)
+          const saved = await db.Critiques.save({
+            projectId: project.value.id,
+            chapterId: chapter.id,
+            model,
+            role: roleLabel(role),
+            findings: parsed.findings,
+            summary: parsed.summary,
+            createdAt: batchTime
+          })
+          newRecords.push(saved)
+          if (idx >= 0) progressList.value[idx].status = 'done'
+        } catch (e: any) {
+          if (idx >= 0) progressList.value[idx].status = 'error'
+          ElMessage.error(`${model} · ${roleLabel(role)} 评审失败：${e?.message || e}`)
+        }
       }
     }
-  }
 
-  currentResults.value = newRecords
-  allRecords.value = (await db.Critiques.list(project.value.id))
-    .sort((a, b) => b.createdAt - a.createdAt)
-  running.value = false
-  const okCount = progressList.value.filter(p => p.status === 'done').length
-  ElMessage.success(`评审完成：${okCount}/${progressList.value.length} 成功`)
+    currentResults.value = newRecords
+    allRecords.value = (await db.Critiques.list(project.value.id))
+      .sort((a, b) => b.createdAt - a.createdAt)
+    const okCount = progressList.value.filter(p => p.status === 'done').length
+    ElMessage.success(`评审完成：${okCount}/${progressList.value.length} 成功`)
+  } finally {
+    running.value = false
+  }
 }
 
 async function removeRecord(r: CritiqueRecord) {
   try {
     await ElMessageBox.confirm('确认删除该评审记录？', '确认', { type: 'warning' })
   } catch { return }
-  await db.Critiques.remove(r.id)
+  try {
+    await db.Critiques.remove(r.id)
+  } catch (e: any) {
+    ElMessage.error(`删除失败：${e?.message || e}`)
+    return
+  }
   allRecords.value = allRecords.value.filter(x => x.id !== r.id)
   currentResults.value = currentResults.value.filter(x => x.id !== r.id)
   ElMessage.success('已删除')

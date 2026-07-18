@@ -41,15 +41,24 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Download, ArrowLeft, Document, Files, InfoFilled } from '@element-plus/icons-vue'
+import { useRoute } from 'vue-router'
 import { useProjectStore } from '@/stores/project'
 
 type ExportKey = 'md' | 'html' | 'epub' | 'docx' | 'pdf'
 
 const projectStore = useProjectStore()
+const route = useRoute()
 const project = computed(() => projectStore.current)
+
+onMounted(async () => {
+  if (!project.value) {
+    const id = route.params.id as string
+    if (id) await projectStore.loadProject(id)
+  }
+})
 
 const loading = ref(false)
 const exporting = ref<ExportKey | null>(null)
@@ -98,7 +107,10 @@ const formats = [
 ]
 
 async function doExport(key: ExportKey) {
-  if (!project.value) return
+  if (!project.value) {
+    ElMessage.warning('请先选择项目')
+    return
+  }
   exporting.value = key
   try {
     const pid = project.value.id
@@ -112,7 +124,7 @@ async function doExport(key: ExportKey) {
     if (path) {
       ElMessage.success(`导出成功，已保存到：${path}`)
     } else {
-      ElMessage.error('导出失败，请重试')
+      ElMessage.info('已取消')
     }
   } catch (e: any) {
     ElMessage.error('导出失败：' + (e?.message || '未知错误'))

@@ -135,7 +135,7 @@
                 <el-option v-for="p in projectPrompts" :key="p.id" :label="p.title" :value="p.id" />
               </el-option-group>
             </el-select>
-            <el-button type="primary" size="small" :icon="Promotion" :loading="generating" :disabled="!canRunCustom" @click="runCustom" style="margin-top:6px; width:100%">
+            <el-button type="primary" size="small" :icon="Promotion" :loading="generating" :disabled="!canRunCustom()" @click="runCustom" style="margin-top:6px; width:100%">
               执行
             </el-button>
           </div>
@@ -202,7 +202,7 @@
       </el-form>
       <template #footer>
         <el-button @click="chapterSettingsVisible = false">关闭</el-button>
-        <el-button type="primary" @click="save; chapterSettingsVisible = false">保存</el-button>
+        <el-button type="primary" @click="() => { save(); chapterSettingsVisible = false }">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -284,15 +284,20 @@ function scheduleSave() {
 async function save() {
   if (!editor.value || !chapter.value) return
   saveStatus.value = 'saving'
-  chapter.value.content = editor.value.getHTML()
-  chapter.value.wordCount = wordCount.value
-  chapter.value.updatedAt = Date.now()
-  await db.Chapters.save(chapter.value)
-  // 同步更新 store
-  const idx = projectStore.chapters.findIndex(c => c.id === chapter.value!.id)
-  if (idx >= 0) projectStore.chapters[idx] = { ...chapter.value }
-  saveStatus.value = 'saved'
-  setTimeout(() => { saveStatus.value = 'idle' }, 1500)
+  try {
+    chapter.value.content = editor.value.getHTML()
+    chapter.value.wordCount = wordCount.value
+    chapter.value.updatedAt = Date.now()
+    await db.Chapters.save(chapter.value)
+    // 同步更新 store
+    const idx = projectStore.chapters.findIndex(c => c.id === chapter.value!.id)
+    if (idx >= 0) projectStore.chapters[idx] = { ...chapter.value }
+    saveStatus.value = 'saved'
+    setTimeout(() => { saveStatus.value = 'idle' }, 1500)
+  } catch (e: any) {
+    saveStatus.value = 'idle'
+    ElMessage.error('保存失败：' + e.message)
+  }
 }
 
 // ====== 章节切换 ======
@@ -336,25 +341,29 @@ async function newChapterAfter() {
 
 // ====== 加载章节 ======
 async function loadChapter(id: string) {
-  if (!project.value) return
-  const c = await db.Chapters.list(project.value.id)
-  projectStore.chapters = c.sort((a, b) => a.order - b.order)
-  const target = projectStore.chapters.find(x => x.id === id)
-  if (!target) {
-    ElMessage.error('章节不存在')
-    return
-  }
-  chapter.value = target
-  currentChapterId.value = id
-  // 加载提示词
-  const all = await db.Prompts.list(project.value.id)
-  builtinPrompts.value = all.filter(p => p.isBuiltIn)
-  projectPrompts.value = all.filter(p => !p.isBuiltIn)
-  // 加载编辑器内容
-  if (editor.value) {
-    editor.value.commands.setContent(target.content || '', false)
-    await nextTick()
-    editor.value.commands.focus('end')
+  try {
+    if (!project.value) return
+    const c = await db.Chapters.list(project.value.id)
+    projectStore.chapters = c.sort((a, b) => a.order - b.order)
+    const target = projectStore.chapters.find(x => x.id === id)
+    if (!target) {
+      ElMessage.error('章节不存在')
+      return
+    }
+    chapter.value = target
+    currentChapterId.value = id
+    // 加载提示词
+    const all = await db.Prompts.list(project.value.id)
+    builtinPrompts.value = all.filter(p => p.isBuiltIn)
+    projectPrompts.value = all.filter(p => !p.isBuiltIn)
+    // 加载编辑器内容
+    if (editor.value) {
+      editor.value.commands.setContent(target.content || '', false)
+      await nextTick()
+      editor.value.commands.focus('end')
+    }
+  } catch (e: any) {
+    ElMessage.error('加载章节失败：' + e.message)
   }
 }
 
@@ -414,7 +423,7 @@ async function runAction(action: AIAction) {
     expand: '扩写', condense: '缩写', outline: '大纲',
     summary: '摘要', custom: ''
   }
-  const tpl = allPrompts.find(p => p.category === actionMap[action] && p.isBuiltIn)
+  const tpl = allPrompts.find(p => p.category === actionMap[action])
   if (!tpl) {
     ElMessage.error('未找到对应提示词模板')
     return
@@ -503,8 +512,10 @@ async function runAI(userMsg: string, isSummary = false) {
       }
     )
     if (isSummary && full) {
-      chapter.value!.summary = full.trim()
-      await db.Chapters.save(chapter.value!)
+      if (chapter.value) {
+        chapter.value.summary = full.trim()
+        await db.Chapters.save(chapter.value)
+      }
       ElMessage.success('摘要已生成')
       aiOutput.value = ''
     }
@@ -528,7 +539,6 @@ function copyOutput() {
 function appendOutput() {
   if (!editor.value || !aiOutput.value) return
   editor.value.commands.focus('end')
-  editor.value.commands.insertContent('<p></p>')
   // 按段落插入
   const paras = aiOutput.value.split(/\n+/).filter(p => p.trim())
   for (const p of paras) {
@@ -557,18 +567,22 @@ function escapeHtml(s: string) {
 // ====== 生命周期 ======
 let autoSaveTimer: any = null
 onMounted(async () => {
-  if (!project.value) {
-    await projectStore.loadProject(route.params.id as string)
+  try {
+    if (!project.value) {
+      await projectStore.loadProject(route.params.id as string)
+    }
+    await loadChapter(currentChapterId.value)
+    if (!aiModel.value && models.value.length > 0) {
+      aiModel.value = project.value?.settings.model || models.value[0].model
+    }
+    // 定时自动保存
+    autoSaveTimer = setInterval(() => {
+      if (saveStatus.value === 'saving') return
+      save()
+    }, 30000)
+  } catch (e: any) {
+    ElMessage.error('初始化失败：' + e.message)
   }
-  await loadChapter(currentChapterId.value)
-  if (!aiModel.value && models.value.length > 0) {
-    aiModel.value = project.value?.settings.model || models.value[0].model
-  }
-  // 定时自动保存
-  autoSaveTimer = setInterval(() => {
-    if (saveStatus.value === 'saving') return
-    save()
-  }, 30000)
 })
 
 onBeforeUnmount(() => {

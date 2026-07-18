@@ -184,7 +184,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowLeft, Plus, Check, RefreshLeft, Delete, Warning
@@ -195,6 +195,7 @@ import * as db from '@/services/db'
 import type { Project } from '@/types'
 
 const router = useRouter()
+const route = useRoute()
 const projectStore = useProjectStore()
 const settingsStore = useSettingsStore()
 
@@ -232,21 +233,34 @@ const tagInputVisible = ref(false)
 const tagInputValue = ref('')
 const tagInputRef = ref<any>(null)
 
-onMounted(() => {
+onMounted(async () => {
   if (projectStore.current) {
     fillForm(projectStore.current)
+    return
+  }
+  const id = route.params.id as string
+  if (!id) return
+  loading.value = true
+  try {
+    await projectStore.loadProject(id)
+    if (projectStore.current) fillForm(projectStore.current)
+  } catch (e: any) {
+    ElMessage.error('加载项目失败：' + (e?.message || '未知错误'))
+  } finally {
+    loading.value = false
   }
 })
 
+const defaultSettings = {
+  model: '', baseUrl: '', apiKey: '',
+  temperature: 0.8, maxTokens: 2048, topP: 1,
+  criticModels: [] as string[], styleSample: ''
+}
+
 function fillForm(p: Project) {
   Object.assign(form, JSON.parse(JSON.stringify(p)))
-  if (!form.settings) {
-    form.settings = {
-      model: '', baseUrl: '', apiKey: '',
-      temperature: 0.8, maxTokens: 2048, topP: 1,
-      criticModels: [], styleSample: ''
-    }
-  }
+  const ps = p.settings || {}
+  form.settings = { ...defaultSettings, ...ps }
   if (!Array.isArray(form.tags)) form.tags = []
   if (!Array.isArray(form.settings.criticModels)) form.settings.criticModels = []
 }
@@ -270,6 +284,10 @@ function removeTag(i: number) {
 }
 
 async function save() {
+  if (!projectStore.current) {
+    ElMessage.error('项目未加载')
+    return
+  }
   if (!form.title.trim()) {
     ElMessage.warning('请输入标题')
     return

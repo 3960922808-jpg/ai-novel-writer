@@ -118,8 +118,12 @@ const autoGenerating = ref(false)
 const outlineForm = ref({ setup: '', count: 10, model: settings.settings?.defaultModel || '' })
 
 onMounted(() => {
-  if (!outlineForm.value.model && models.value.length > 0) {
-    outlineForm.value.model = models.value[0].model
+  try {
+    if (!outlineForm.value.model && models.value.length > 0) {
+      outlineForm.value.model = models.value[0].model
+    }
+  } catch (e) {
+    console.error('初始化章节列表失败', e)
   }
 })
 
@@ -198,11 +202,12 @@ async function remove(c: Chapter) {
 async function aiSummary(c: Chapter) {
   const provider = settings.findProviderForModel(project.value!.settings.model)
   if (!provider?.apiKey) { ElMessage.warning('请先在设置中配置 API Key'); return }
-  const prompts = await Prompts.list(project.value!.id)
-  const tpl = prompts.find(p => p.category === '摘要')!
-  const msg = { role: 'user' as const, content: ai.renderTemplate(tpl.content, { content: c.content.replace(/<[^>]+>/g, '') }) }
-  ElMessage.info('生成中...')
   try {
+    const prompts = await Prompts.list(project.value!.id)
+    const tpl = prompts.find(p => p.category === '摘要')
+    if (!tpl) { ElMessage.warning('未找到「摘要」分类的提示词模板，请先在提示词库中创建'); return }
+    const msg = { role: 'user' as const, content: ai.renderTemplate(tpl.content, { content: c.content.replace(/<[^>]+>/g, '') }) }
+    ElMessage.info('生成中...')
     const text = await ai.chat(ai.buildRequest({
       baseUrl: provider.baseUrl, apiKey: provider.apiKey,
       model: project.value!.settings.model, messages: [msg], temperature: 0.5
@@ -226,7 +231,8 @@ async function doAutoGenerate() {
   autoGenerating.value = true
   try {
     const prompts = await Prompts.list(project.value!.id)
-    const tpl = prompts.find(p => p.category === '大纲')!
+    const tpl = prompts.find(p => p.category === '大纲')
+    if (!tpl) { ElMessage.warning('未找到「大纲」分类的提示词模板，请先在提示词库中创建'); return }
     const setup = outlineForm.value.setup || project.value?.description || ''
     const msg = { role: 'user' as const, content: ai.renderTemplate(tpl.content, {
       genre: project.value!.genre, title: project.value!.title, setup, count: outlineForm.value.count

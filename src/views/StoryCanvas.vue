@@ -179,7 +179,11 @@ watch(project, (p) => {
 
 async function load() {
   if (!project.value) return
-  nodes.value = await db.Canvas.list(project.value.id)
+  try {
+    nodes.value = await db.Canvas.list(project.value.id)
+  } catch (e: any) {
+    ElMessage.error('加载失败：' + e.message)
+  }
 }
 
 function typeClass(t: CanvasNode['type']) {
@@ -225,7 +229,11 @@ function startDrag(e: MouseEvent, node: CanvasNode) {
   const onUp = async () => {
     document.removeEventListener('mousemove', onMove)
     document.removeEventListener('mouseup', onUp)
-    await db.Canvas.save(node)
+    try {
+      await db.Canvas.save(node)
+    } catch (e: any) {
+      ElMessage.error('保存位置失败：' + e.message)
+    }
   }
   document.addEventListener('mousemove', onMove)
   document.addEventListener('mouseup', onUp)
@@ -233,23 +241,27 @@ function startDrag(e: MouseEvent, node: CanvasNode) {
 
 async function addNode(type: CanvasNode['type']) {
   if (!project.value) return
-  const offset = (nodes.value.length % 10) * 30
-  const node = await db.Canvas.save({
-    projectId: project.value.id,
-    type,
-    x: 80 + offset,
-    y: 80 + offset,
-    width: 200,
-    height: 120,
-    title: `新${TYPE_LABELS[type]}`,
-    content: '',
-    color: TYPE_COLORS[type],
-    links: [],
-    createdAt: Date.now()
-  } as any)
-  nodes.value.push(node)
-  ElMessage.success('已添加节点')
-  edit(node)
+  try {
+    const offset = (nodes.value.length % 10) * 30
+    const node = await db.Canvas.save({
+      projectId: project.value.id,
+      type,
+      x: 80 + offset,
+      y: 80 + offset,
+      width: 200,
+      height: 120,
+      title: `新${TYPE_LABELS[type]}`,
+      content: '',
+      color: TYPE_COLORS[type],
+      links: [],
+      createdAt: Date.now()
+    } as any)
+    nodes.value.push(node)
+    ElMessage.success('已添加节点')
+    edit(node)
+  } catch (e: any) {
+    ElMessage.error('添加失败：' + e.message)
+  }
 }
 
 function edit(node: CanvasNode) {
@@ -272,38 +284,62 @@ async function save() {
   if (!form.id) return
   const node = nodes.value.find(n => n.id === form.id)
   if (!node) return
-  node.title = form.title
-  node.type = form.type
-  node.content = form.content
-  node.color = form.color
-  node.links = [...form.links]
-  await db.Canvas.save(node)
-  ElMessage.success('已保存')
-  dialogVisible.value = false
+  const updated = {
+    ...node,
+    title: form.title,
+    type: form.type,
+    content: form.content,
+    color: form.color,
+    links: [...form.links]
+  }
+  try {
+    await db.Canvas.save(updated)
+    node.title = form.title
+    node.type = form.type
+    node.content = form.content
+    node.color = form.color
+    node.links = [...form.links]
+    ElMessage.success('已保存')
+    dialogVisible.value = false
+  } catch (e: any) {
+    ElMessage.error('保存失败：' + e.message)
+  }
 }
 
 async function saveAll() {
-  for (const n of nodes.value) {
-    await db.Canvas.save(n)
+  try {
+    for (const n of nodes.value) {
+      await db.Canvas.save(n)
+    }
+    ElMessage.success('布局已保存')
+  } catch (e: any) {
+    ElMessage.error('保存失败：' + e.message)
   }
-  ElMessage.success('布局已保存')
 }
 
 async function remove(node: CanvasNode) {
-  await ElMessageBox.confirm(
-    `删除节点《${node.title || typeLabel(node.type)}》？`,
-    '确认',
-    { type: 'warning' }
-  )
-  for (const n of nodes.value) {
-    if (n.links.includes(node.id)) {
-      n.links = n.links.filter(id => id !== node.id)
-      await db.Canvas.save(n)
-    }
+  try {
+    await ElMessageBox.confirm(
+      `删除节点《${node.title || typeLabel(node.type)}》？`,
+      '确认',
+      { type: 'warning' }
+    )
+  } catch {
+    return
   }
-  await db.Canvas.remove(node.id)
-  nodes.value = nodes.value.filter(n => n.id !== node.id)
-  ElMessage.success('已删除')
+  try {
+    for (const n of nodes.value) {
+      if (n.links.includes(node.id)) {
+        n.links = n.links.filter(id => id !== node.id)
+        await db.Canvas.save(n)
+      }
+    }
+    await db.Canvas.remove(node.id)
+    nodes.value = nodes.value.filter(n => n.id !== node.id)
+    ElMessage.success('已删除')
+  } catch (e: any) {
+    ElMessage.error('删除失败：' + e.message)
+  }
 }
 </script>
 

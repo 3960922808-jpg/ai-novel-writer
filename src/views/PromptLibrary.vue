@@ -221,7 +221,11 @@ watch(() => project.value?.id, (id) => {
 
 async function load() {
   if (!project.value) return
-  prompts.value = await Prompts.list(project.value.id)
+  try {
+    prompts.value = await Prompts.list(project.value.id)
+  } catch (e: any) {
+    ElMessage.error('加载失败：' + e.message)
+  }
 }
 
 const filtered = computed(() => {
@@ -284,17 +288,29 @@ async function save() {
     delete doc.id
     doc.createdAt = Date.now()
   }
-  await Prompts.save(doc)
-  ElMessage.success('保存成功')
-  editVisible.value = false
-  await load()
+  try {
+    await Prompts.save(doc)
+    ElMessage.success('保存成功')
+    editVisible.value = false
+    await load()
+  } catch (e: any) {
+    ElMessage.error('保存失败：' + e.message)
+  }
 }
 
 async function confirmDelete(p: Prompt) {
-  await ElMessageBox.confirm(`删除提示词《${p.title}》？`, '确认', { type: 'warning' })
-  await Prompts.remove(p.id)
-  ElMessage.success('已删除')
-  await load()
+  try {
+    await ElMessageBox.confirm(`删除提示词《${p.title}》？`, '确认', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    await Prompts.remove(p.id)
+    ElMessage.success('已删除')
+    await load()
+  } catch (e: any) {
+    ElMessage.error('删除失败：' + e.message)
+  }
 }
 
 function openTest(p: Prompt) {

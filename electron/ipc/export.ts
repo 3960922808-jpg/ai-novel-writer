@@ -21,7 +21,7 @@ function htmlToPlain(html: string): string {
   return html
     .replace(/<p[^>]*>/g, '\n')
     .replace(/<\/p>/g, '\n')
-    .replace(/<br\s*\/?}/g, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, ' ')
     .replace(/&lt;/g, '<')
@@ -32,7 +32,8 @@ function htmlToPlain(html: string): string {
 }
 
 async function saveDialog(win: BrowserWindow | null, defaultName: string, ext: string) {
-  const result = await dialog.showSaveDialog(win!, {
+  if (!win) return null as any
+  const result = await dialog.showSaveDialog(win, {
     defaultPath: defaultName,
     filters: [{ name: ext.toUpperCase(), extensions: [ext] }]
   })
@@ -65,7 +66,7 @@ export function registerExportIPC() {
     if (project.description) body += `<blockquote>${project.description}</blockquote>`
     for (const c of chapters) {
       body += `<h2>第${c.order}章 ${c.title}</h2>`
-      body += c.contentType === 'html' ? c.content : marked.parse(c.content)
+      body += c.contentType === 'html' ? c.content : (marked.parse(c.content) as string)
     }
     const html = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>${project.title}</title>
     <style>body{max-width:760px;margin:40px auto;font-family:"思源宋体",serif;line-height:1.9;padding:0 16px}
@@ -83,7 +84,7 @@ export function registerExportIPC() {
     const { project, chapters } = await buildProjectData(projectId)
     const sections = chapters.map(c => ({
       title: `第${c.order}章 ${c.title}`,
-      content: c.contentType === 'html' ? c.content : marked.parse(c.content)
+      content: c.contentType === 'html' ? c.content : (marked.parse(c.content) as string)
     }))
     if (sections.length === 0) sections.push({ title: '空', content: '<p>暂无内容</p>' })
     const epub = new EPub(
@@ -138,19 +139,27 @@ export function registerExportIPC() {
 
   // ====== PDF（通过浏览器打印） ======
   ipcMain.handle('export:pdf', async (e, projectId: string) => {
-    // PDF 导出委托给渲染进程：渲染 HTML 后用 webContents.printToPDF
-    const win = BrowserWindow.fromWebContents(e.sender)
-    if (!win) return null
-    const pdf = await win.webContents.printToPDF({
-      printBackground: true,
-      pageSize: 'A4',
-      margins: { top: 0.5, bottom: 0.5, left: 0.5, right: 0.5 }
-    })
-    const { project } = await buildProjectData(projectId)
-    const r = await saveDialog(win, `${project.title}.pdf`, 'pdf')
-    if (r.canceled || !r.filePath) return null
-    await fs.writeFile(r.filePath, pdf)
-    return r.filePath
+    try {
+      const win = BrowserWindow.fromWebContents(e.sender)
+      if (!win) return null
+      const data = await buildProjectData(projectId)
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${data.project.title}</title>
+      <style>body{font-family:'Microsoft YaHei',sans-serif;max-width:800px;margin:40px auto;padding:20px;line-height:1.8}
+      h1{text-align:center} h2{margin-top:2em;border-bottom:1px solid #ccc;padding-bottom:5px}</style></head>
+      <body><h1>${data.project.title}</h1>${data.chapters.map(c => `<h2>${c.title}</h2>${c.content}`).join('')}</body></html>`
+
+      const pdfWin = new BrowserWindow({ show: false, webPreferences: { offscreen: true } })
+      await pdfWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
+      const pdf = await pdfWin.webContents.printToPDF({ printBackground: false, margins: { top: 0, bottom: 0, left: 0, right: 0 } })
+      pdfWin.destroy()
+      const r = await saveDialog(win, `${data.project.title}.pdf`, 'pdf')
+      if (!r || r.canceled || !r.filePath) return null
+      await fs.writeFile(r.filePath, pdf)
+      return r.filePath
+    } catch (e: any) {
+      console.error('PDF 导出失败', e)
+      throw new Error('PDF 导出失败：' + e.message)
+    }
   })
 
   // ====== 通用文件保存 ======

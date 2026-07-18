@@ -188,30 +188,34 @@ function wordsOn(date: string) {
 
 async function load() {
   if (!project.value) return
-  const list = await Goals.list(project.value.id)
-  let isNew = false
-  if (list.length > 0) {
-    Object.assign(goal, list[0])
-  } else {
-    Object.assign(goal, {
-      projectId: project.value.id,
-      dailyTarget: 2000,
-      weeklyTarget: 14000,
-      monthlyTarget: 60000,
-      streak: 0,
-      lastWriteDate: undefined,
-      history: []
-    })
-    isNew = true
-  }
-  form.dailyTarget = goal.dailyTarget
-  form.weeklyTarget = goal.weeklyTarget
-  form.monthlyTarget = goal.monthlyTarget
-  const oldStreak = goal.streak
-  const oldLast = goal.lastWriteDate
-  recomputeStreak()
-  if (isNew || goal.streak !== oldStreak || goal.lastWriteDate !== oldLast) {
-    await Goals.save({ ...goal })
+  try {
+    const list = await Goals.list(project.value.id)
+    let isNew = false
+    if (list.length > 0) {
+      Object.assign(goal, list[0])
+    } else {
+      Object.assign(goal, {
+        projectId: project.value.id,
+        dailyTarget: 2000,
+        weeklyTarget: 14000,
+        monthlyTarget: 60000,
+        streak: 0,
+        lastWriteDate: undefined,
+        history: []
+      })
+      isNew = true
+    }
+    form.dailyTarget = goal.dailyTarget
+    form.weeklyTarget = goal.weeklyTarget
+    form.monthlyTarget = goal.monthlyTarget
+    const oldStreak = goal.streak
+    const oldLast = goal.lastWriteDate
+    recomputeStreak()
+    if (isNew || goal.streak !== oldStreak || goal.lastWriteDate !== oldLast) {
+      await Goals.save({ ...goal })
+    }
+  } catch (e: any) {
+    ElMessage.error('加载失败：' + e.message)
   }
 }
 
@@ -328,7 +332,11 @@ async function saveGoals() {
 }
 
 async function genMock() {
-  await ElMessageBox.confirm('将随机生成最近 30 天的写作数据，会覆盖现有 history，是否继续？', '确认', { type: 'warning' })
+  try {
+    await ElMessageBox.confirm('将随机生成最近 30 天的写作数据，会覆盖现有 history，是否继续？', '确认', { type: 'warning' })
+  } catch {
+    return
+  }
   const history: { date: string; words: number }[] = []
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -341,8 +349,12 @@ async function genMock() {
   }
   goal.history = history
   recomputeStreak()
-  await Goals.save({ ...goal })
-  ElMessage.success('已生成模拟数据')
+  try {
+    await Goals.save({ ...goal })
+    ElMessage.success('已生成模拟数据')
+  } catch (e: any) {
+    ElMessage.error('生成失败：' + e.message)
+  }
 }
 </script>
 

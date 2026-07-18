@@ -178,15 +178,19 @@ const modelInputVisible = ref<Record<number, boolean>>({})
 const modelInputValue = ref<Record<number, string>>({})
 const modelInputRefs = ref<any[] | null>(null)
 
-onMounted(() => {
+onMounted(async () => {
   if (settingsStore.settings) {
     fillForm(settingsStore.settings)
-  } else {
-    loading.value = true
-    settingsStore.load().then(() => {
-      if (settingsStore.settings) fillForm(settingsStore.settings)
-      loading.value = false
-    })
+    return
+  }
+  loading.value = true
+  try {
+    await settingsStore.load()
+    if (settingsStore.settings) fillForm(settingsStore.settings)
+  } catch (e: any) {
+    ElMessage.error('加载设置失败：' + (e?.message || '未知错误'))
+  } finally {
+    loading.value = false
   }
 })
 

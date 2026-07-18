@@ -5,7 +5,7 @@
         <h1 class="page-title">{{ project.title }}</h1>
         <p class="text-muted text-sm">{{ project.description || '暂无简介' }}</p>
       </div>
-      <el-button type="primary" :icon="Edit" @click="$router.push({ name: 'editor', params: { chapterId: latestChapterId } })">
+      <el-button type="primary" :icon="Edit" :disabled="!latestChapterId" @click="$router.push({ name: 'editor', params: { chapterId: latestChapterId } })">
         继续写作
       </el-button>
     </div>
@@ -112,8 +112,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { Edit, ArrowRight, Document, Connection, ChatLineSquare, MagicStick, Download } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { useProjectStore } from '@/stores/project'
 import * as db from '@/services/db'
 import type { WritingGoal } from '@/types'
@@ -136,17 +137,25 @@ const todayWords = ref(0)
 const streak = ref(0)
 const goal = ref<WritingGoal | null>(null)
 
-onMounted(async () => {
-  if (!project.value) return
-  const goals = await db.Goals.list(project.value.id)
-  goal.value = goals[0] || null
-  if (goal.value) {
-    streak.value = goal.value.streak || 0
-    const today = new Date().toISOString().slice(0, 10)
-    const todayRec = goal.value.history.find(h => h.date === today)
-    todayWords.value = todayRec?.words || 0
+async function loadGoal(id: string) {
+  try {
+    const goals = await db.Goals.list(id)
+    goal.value = goals[0] || null
+    if (goal.value) {
+      streak.value = goal.value.streak || 0
+      const today = new Date().toISOString().slice(0, 10)
+      const todayRec = goal.value.history.find(h => h.date === today)
+      todayWords.value = todayRec?.words || 0
+    }
+  } catch (e: any) {
+    console.error(e)
+    ElMessage.error('加载写作目标失败：' + (e.message || ''))
   }
-})
+}
+
+watch(() => project.value?.id, (id) => {
+  if (id) loadGoal(id)
+}, { immediate: true })
 
 function statusType(s: string): any {
   return { '完成': 'success', '已发表': 'primary', '草稿': 'info' }[s] || 'info'
