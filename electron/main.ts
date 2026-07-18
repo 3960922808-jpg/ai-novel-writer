@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import fs from 'node:fs'
 import { registerStoreIPC } from './ipc/store'
 import { registerAIIPC } from './ipc/ai'
 import { registerExportIPC } from './ipc/export'
@@ -8,6 +9,24 @@ import { registerFileIPC } from './ipc/files'
 import { initDB } from './lib/db'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// 找 preload 文件：优先 .js，回退 .mjs
+function findPreload(): string {
+  const candidates = [
+    path.join(__dirname, 'preload.js'),
+    path.join(__dirname, 'preload.mjs'),
+    path.join(__dirname, '..', 'dist-electron', 'preload.js'),
+    path.join(__dirname, '..', 'dist-electron', 'preload.mjs')
+  ]
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      console.log('[main] 找到 preload:', p)
+      return p
+    }
+  }
+  console.error('[main] 未找到 preload 文件！搜索路径:', candidates)
+  return candidates[0]
+}
 
 let mainWindow: BrowserWindow | null = null
 
@@ -21,7 +40,7 @@ function createWindow() {
     backgroundColor: '#1a1a1a',
     title: 'AI 写小说',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: findPreload(),
       contextIsolation: true,
       nodeIntegration: false
     }
