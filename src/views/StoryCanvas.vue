@@ -263,10 +263,28 @@ function otherNodes(currentId?: ID) {
 
 function onModeChange(val: boolean) {
   if (val) {
-    ElMessage.info('已进入连线模式：拖拽节点两侧红色圆点到其他节点建立连接')
+    ElMessage.info('已进入连线模式：拖拽节点两侧红色圆点到其他节点建立连接（仍可拖动方块本身）')
   } else {
     dragFrom.value = null
     dragLine.value = ''
+  }
+}
+
+// 把响应式节点转成纯对象，避免 IPC 序列化 Vue Proxy 时丢数据
+function toPlain(n: CanvasNode): CanvasNode {
+  return {
+    id: n.id,
+    projectId: n.projectId,
+    type: n.type,
+    x: n.x,
+    y: n.y,
+    width: n.width,
+    height: n.height,
+    title: n.title,
+    content: n.content,
+    color: n.color,
+    links: [...n.links],
+    createdAt: n.createdAt
   }
 }
 
@@ -300,24 +318,29 @@ function toCanvasCoord(clientX: number, clientY: number) {
 }
 
 function startDrag(e: MouseEvent, node: CanvasNode) {
-  // 连线模式下不拖拽节点位置（避免与连线冲突），只允许通过红点连线
-  if (connectMode.value) return
   const target = e.target as HTMLElement
+  // 点到删除按钮或红点时不触发拖动
   if (target.closest('.node-del')) return
   if (target.closest('.node-dot')) return
+  e.preventDefault()
   const startX = e.clientX - node.x
   const startY = e.clientY - node.y
+  let moved = false
   const onMove = (ev: MouseEvent) => {
+    moved = true
     node.x = Math.max(0, ev.clientX - startX)
     node.y = Math.max(0, ev.clientY - startY)
   }
   const onUp = async () => {
     document.removeEventListener('mousemove', onMove)
     document.removeEventListener('mouseup', onUp)
-    try {
-      await db.Canvas.save(node)
-    } catch (e: any) {
-      ElMessage.error('保存位置失败：' + e.message)
+    // 只有真的拖动了才保存，避免误触
+    if (moved) {
+      try {
+        await db.Canvas.save(toPlain(node))
+      } catch (e: any) {
+        ElMessage.error('保存位置失败：' + e.message)
+      }
     }
   }
   document.addEventListener('mousemove', onMove)
@@ -362,7 +385,19 @@ async function onCanvasMouseUp(e: MouseEvent) {
     return
   }
   const fromNodeId = dragFrom.value.nodeId
-  const targetId = hoverNodeId.value
+  // 用鼠标位置做兜底检测：如果 hoverNodeId 没更新（比如鼠标快速松开），用坐标命中测试
+  let targetId = hoverNodeId.value
+  if (!targetId || targetId === fromNodeId) {
+    // 坐标命中测试
+    const pt = toCanvasCoord(e.clientX, e.clientY)
+    for (const n of nodes.value) {
+      if (n.id === fromNodeId) continue
+      if (pt.x >= n.x && pt.x <= n.x + n.width && pt.y >= n.y && pt.y <= n.y + n.height) {
+        targetId = n.id
+        break
+      }
+    }
+  }
   dragFrom.value = null
   dragLine.value = ''
 
@@ -373,19 +408,14 @@ async function onCanvasMouseUp(e: MouseEvent) {
   const fromNode = nodes.value.find(n => n.id === fromNodeId)
   const toNode = nodes.value.find(n => n.id === targetId)
   if (!fromNode || !toNode) return
-  // 避免重复连线
-  if (fromNode.links.includes(targetId)) {
+  // 避免重复连线（双向检查）
+  if (fromNode.links.includes(targetId) || toNode.links.includes(fromNodeId)) {
     ElMessage.info('已存在连接')
-    return
-  }
-  // 双向连线（任意一方有对方就算已连）
-  if (toNode.links.includes(fromNodeId)) {
-    ElMessage.info('已存在反向连接')
     return
   }
   fromNode.links.push(targetId)
   try {
-    await db.Canvas.save(fromNode)
+    await db.Canvas.save(toPlain(fromNode))
     ElMessage.success(`已连接：${fromNode.title} → ${toNode.title}`)
   } catch (err: any) {
     ElMessage.error('连线失败：' + err.message)
@@ -437,21 +467,13 @@ async function save() {
   if (!form.id) return
   const node = nodes.value.find(n => n.id === form.id)
   if (!node) return
-  const updated = {
-    ...node,
-    title: form.title,
-    type: form.type,
-    content: form.content,
-    color: form.color,
-    links: [...form.links]
-  }
+  node.title = form.title
+  node.type = form.type
+  node.content = form.content
+  node.color = form.color
+  node.links = [...form.links]
   try {
-    await db.Canvas.save(updated)
-    node.title = form.title
-    node.type = form.type
-    node.content = form.content
-    node.color = form.color
-    node.links = [...form.links]
+    await db.Canvas.save(toPlain(node))
     ElMessage.success('已保存')
     dialogVisible.value = false
   } catch (e: any) {
@@ -462,7 +484,7 @@ async function save() {
 async function saveAll() {
   try {
     for (const n of nodes.value) {
-      await db.Canvas.save(n)
+      await db.Canvas.save(toPlain(n))
     }
     ElMessage.success('布局已保存')
   } catch (e: any) {
@@ -484,7 +506,7 @@ async function remove(node: CanvasNode) {
     for (const n of nodes.value) {
       if (n.links.includes(node.id)) {
         n.links = n.links.filter(id => id !== node.id)
-        await db.Canvas.save(n)
+        await db.Canvas.save(toPlain(n))
       }
     }
     await db.Canvas.remove(node.id)
@@ -557,9 +579,9 @@ async function remove(node: CanvasNode) {
 .node:active {
   cursor: grabbing;
 }
-/* 连线模式下节点不拖拽，鼠标改为默认 */
+/* 连线模式下仍可拖动方块，只是多了红点用于连线 */
 .node.connect-mode {
-  cursor: default;
+  cursor: move;
 }
 /* 连线模式下悬停目标高亮 */
 .node.drop-target {

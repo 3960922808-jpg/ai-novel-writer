@@ -143,7 +143,7 @@
             <el-button size="small" :icon="Download" @click="exportCurrent">导出</el-button>
           </div>
           <!-- 保存作品按钮（位于上传文件/导出下方） -->
-          <button class="save-work-btn" :class="{ saving: saveStatus === 'saving' }" @click="save">
+          <button class="save-work-btn" :class="{ saving: saveStatus === 'saving' }" @click="save()">
             <el-icon v-if="saveStatus === 'saving'"><Loading /></el-icon>
             <span>{{ saveStatus === 'saving' ? '保存中...' : '保存作品' }}</span>
           </button>
@@ -226,7 +226,10 @@
             <p class="chat-empty-title">对话区域</p>
             <p class="chat-empty-tip">输入任何你对小说的疑问，比如"人物设定如何修改"，"文章建议"。</p>
             <p class="chat-empty-tip">提示：输入 <code class="hint-code">/</code> 可触发技能，输入 <code class="hint-code">@</code> 可关联章节内容</p>
-            <a class="billing-link" href="javascript:void(0)">计费规则</a>
+            <button class="canvas-link-btn" @click="goToCanvas">
+              <el-icon><Connection /></el-icon>
+              <span>打开故事画布</span>
+            </button>
           </div>
           <div v-else class="chat-list">
             <div
@@ -405,6 +408,12 @@ function goBack() {
   router.push({ name: 'chapters' })
 }
 
+function goToCanvas() {
+  if (project.value) {
+    router.push({ name: 'canvas', params: { id: project.value.id } })
+  }
+}
+
 function toggleMainContent() {
   mainContentExpanded.value = !mainContentExpanded.value
 }
@@ -427,24 +436,17 @@ const editor = useEditor({
     CharacterCount.configure({ limit: null })
   ],
   autofocus: 'end',
-  onUpdate: () => { if (!isLoading.value) scheduleSave() }
+  // 手动保存模式：不再 onUpdate 触发自动保存
+  onUpdate: () => {}
 })
 
 const wordCount = computed(() => editor.value?.storage.characterCount.characters() || 0)
 
-// 保存
+// 保存（手动触发）
 const saveStatus = ref<'idle' | 'saving' | 'saved'>('idle')
 const isLoading = ref(false) // 加载章节时禁止保存
-let saveTimer: any = null
 const saveStatusText = computed(() => ({ idle: '', saving: '保存中...', saved: '已保存' }[saveStatus.value]))
 const saveStatusClass = computed(() => ({ idle: '', saving: 'saving', saved: 'saved' }[saveStatus.value]))
-
-function scheduleSave() {
-  if (isLoading.value) return
-  if (saveTimer) clearTimeout(saveTimer)
-  saveStatus.value = 'saving'
-  saveTimer = setTimeout(() => save({ silent: true }), 1500)
-}
 
 async function save(opts: { silent?: boolean } = {}) {
   if (!editor.value || !chapter.value || isLoading.value) return
@@ -458,13 +460,13 @@ async function save(opts: { silent?: boolean } = {}) {
     if (idx >= 0) projectStore.chapters[idx] = { ...chapter.value }
     saveStatus.value = 'saved'
     setTimeout(() => { saveStatus.value = 'idle' }, 1500)
+    if (!opts.silent) ElMessage.success('已保存')
   } catch (e: any) {
     saveStatus.value = 'idle'
-    // 静默保存失败不弹窗（自动保存），仅手动保存或显式请求才提示
     if (!opts.silent) {
       ElMessage.error('保存失败：' + e.message)
     } else {
-      console.warn('[Editor] 自动保存失败（静默）:', e.message)
+      console.warn('[Editor] 保存失败（静默）:', e.message)
     }
   }
 }
@@ -515,8 +517,17 @@ async function loadChapter(id: string) {
   try {
     isLoading.value = true
     if (!project.value) return
-    const c = await db.Chapters.list(project.value.id)
+    // 并行加载所有数据，避免串行 IPC 往返造成卡顿
+    const [c, all, sk] = await Promise.all([
+      db.Chapters.list(project.value.id),
+      db.Prompts.list(project.value.id),
+      SkillsDB.list(project.value.id)
+    ])
     projectStore.chapters = c.sort((a, b) => a.order - b.order)
+    builtinPrompts.value = all.filter(p => p.isBuiltIn)
+    projectPrompts.value = all.filter(p => !p.isBuiltIn)
+    skills.value = sk
+
     const target = projectStore.chapters.find(x => x.id === id)
     if (!target) {
       ElMessage.error('章节不存在')
@@ -524,20 +535,17 @@ async function loadChapter(id: string) {
     }
     chapter.value = target
     currentChapterId.value = id
-    const all = await db.Prompts.list(project.value.id)
-    builtinPrompts.value = all.filter(p => p.isBuiltIn)
-    projectPrompts.value = all.filter(p => !p.isBuiltIn)
-    // 加载技能
-    skills.value = await SkillsDB.list(project.value.id)
     if (editor.value) {
-      // false 表示不触发 onUpdate，避免加载时触发保存
+      // false 表示不触发 onUpdate
       editor.value.commands.setContent(target.content || '', false)
-      await nextTick()
-      editor.value.commands.focus('end')
     }
-    // 加载完成后再放开保存
-    await nextTick()
-    isLoading.value = false
+    // 用 requestAnimationFrame 让浏览器先绘制，再做聚焦等非关键操作
+    requestAnimationFrame(() => {
+      isLoading.value = false
+      if (editor.value) {
+        editor.value.commands.focus('end')
+      }
+    })
   } catch (e: any) {
     isLoading.value = false
     ElMessage.error('加载章节失败：' + e.message)
@@ -940,7 +948,6 @@ function formatTime(t: number) {
 }
 
 // ===== 生命周期 =====
-let autoSaveTimer: any = null
 const inputRef = ref<HTMLTextAreaElement | null>(null)
 
 onMounted(async () => {
@@ -952,25 +959,21 @@ onMounted(async () => {
     if (!aiModel.value && models.value.length > 0) {
       aiModel.value = project.value?.settings.model || models.value[0].model
     }
-    autoSaveTimer = setInterval(() => {
-      if (saveStatus.value === 'saving') return
-      save()
-    }, 30000)
   } catch (e: any) {
     ElMessage.error('初始化失败：' + e.message)
   }
 })
 
 onBeforeUnmount(() => {
-  if (autoSaveTimer) clearInterval(autoSaveTimer)
-  if (saveTimer) clearTimeout(saveTimer)
-  save()
+  // 切换页面前静默保存一次，避免数据丢失
+  save({ silent: true })
   editor.value?.destroy()
 })
 
 watch(() => route.params.chapterId, async (id) => {
   if (id && id !== currentChapterId.value) {
-    await save()
+    // 切换章节前静默保存
+    await save({ silent: true })
     await loadChapter(id as string)
   }
 })
@@ -1415,6 +1418,25 @@ watch(() => route.params.chapterId, async (id) => {
   font-size: 11px;
   color: #a0aec0;
   text-decoration: underline;
+}
+.canvas-link-btn {
+  margin-top: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid #2563eb;
+  background: #e6f0ff;
+  color: #2563eb;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+.canvas-link-btn:hover {
+  background: #2563eb;
+  color: #fff;
 }
 
 .chat-list { display: flex; flex-direction: column; gap: 12px; }

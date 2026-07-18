@@ -8,6 +8,7 @@ dist-electron/
 release/
 release-v2/
 release-*/
+ai/
 *.app
 *.exe
 *.dmg
