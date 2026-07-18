@@ -18,13 +18,13 @@
           <span>AI 写小说 有新版本可用</span>
         </div>
         <div class="update-meta">
-          <el-tag size="small">{{ shaShort }}</el-tag>
-          <span class="update-author">{{ updateInfo?.author }}</span>
+          <el-tag size="small" type="success">{{ updateInfo?.version }}</el-tag>
+          <span class="update-author">{{ updateInfo?.name }}</span>
           <span class="update-date">{{ formatDate(updateInfo?.date) }}</span>
         </div>
-        <div class="update-message">{{ firstLine(updateInfo?.message) }}</div>
+        <div class="update-message">{{ firstLine(updateInfo?.notes) }}</div>
         <div class="update-tip">
-          点击"立即更新"将自动下载最新版本并重启应用，无需手动操作。
+          点击"立即更新"将自动下载安装包（{{ formatSize(updateInfo?.downloadSize) }}）并启动安装程序。
         </div>
       </template>
 
@@ -33,7 +33,7 @@
         <div class="update-headline">
           <el-icon class="update-icon is-loading" v-if="downloadPercent < 100"><Loading /></el-icon>
           <el-icon class="update-icon" v-else><SuccessFilled /></el-icon>
-          <span>{{ downloadPercent >= 100 ? '下载完成，正在重启...' : '正在下载更新...' }}</span>
+          <span>{{ downloadPercent >= 100 ? '下载完成，正在启动安装程序...' : '正在下载更新...' }}</span>
         </div>
         <el-progress
           :percentage="downloadPercent"
@@ -74,16 +74,18 @@ import { useSettingsStore } from '@/stores/settings'
 const settings = useSettingsStore()
 
 interface UpdateInfo {
-  sha: string
-  message: string
-  author: string
+  version: string
+  name: string
+  notes: string
   date: string
   url: string
+  downloadUrl: string
+  downloadSize: number
+  downloadName: string
 }
 
 const updateDialogVisible = ref(false)
 const updateInfo = ref<UpdateInfo | null>(null)
-const shaShort = computed(() => (updateInfo.value?.sha || '').slice(0, 7))
 
 // 下载状态
 type DownloadState = 'idle' | 'downloading' | 'error' | 'done'
@@ -143,6 +145,13 @@ function formatDate(s?: string) {
   const d = new Date(s)
   if (isNaN(d.getTime())) return s
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+function formatSize(bytes?: number) {
+  if (!bytes) return '未知'
+  const mb = bytes / 1024 / 1024
+  if (mb >= 1) return `${mb.toFixed(2)} MB`
+  return `${(bytes / 1024).toFixed(0)} KB`
 }
 
 async function startDownload() {

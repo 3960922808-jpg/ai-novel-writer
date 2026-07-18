@@ -66,15 +66,18 @@ const api = {
   updater: {
     // 手动触发一次检查
     check: () => ipcRenderer.invoke('updater:check'),
-    // 下载更新并自动重启
+    // 下载更新并启动安装
     download: () => ipcRenderer.invoke('updater:download'),
     // 监听"发现新版本"事件
     onUpdateAvailable: (cb: (info: {
-      sha: string
-      message: string
-      author: string
+      version: string
+      name: string
+      notes: string
       date: string
       url: string
+      downloadUrl: string
+      downloadSize: number
+      downloadName: string
     }) => void) => {
       const listener = (_e: any, info: any) => cb(info)
       ipcRenderer.on('updater:available', listener)

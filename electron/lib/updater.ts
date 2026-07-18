@@ -2,14 +2,14 @@
  * 轻量级 GitHub 更新检查器 + 软件内下载自动重启
  * - 启动后延迟 10 秒检查一次
  * - 每隔 30 分钟轮询一次
- * - 检测到 main 分支最新 commit SHA 与本地记录不同时：
+ * - 检测到最新 Release 版本号比本地高时：
  *   1. 弹出系统原生 Notification
  *   2. 通过 IPC 通知渲染进程，让前端弹 Element Plus 对话框
  * - 用户在弹窗点"立即更新"后：
- *   1. 下载 main 分支 zip 包到 userData/update-cache/
+ *   1. 从 GitHub Release 下载 Setup.exe 到 userData/update-cache/
  *   2. 通过 IPC 推送下载进度
- *   3. 下载完成后调用 app.relaunch() + app.exit(0) 自动重启
- * - SHA 记录在 settings.lastCommitSha，可在设置页关闭
+ *   3. 下载完成后启动安装程序并退出当前应用
+ * - 本地版本号从 package.json 读取
  */
 import { app, BrowserWindow, Notification, shell } from 'electron'
 import { getDB } from './db'
@@ -18,40 +18,68 @@ import path from 'node:path'
 import { Readable } from 'node:stream'
 
 const REPO = '3960922808-jpg/ai-novel-writer'
-const BRANCH = 'main'
-const COMMITS_API = `https://api.github.com/repos/${REPO}/commits/${BRANCH}`
-// codeload 直接下载 main 分支 zip 包
-const ZIP_URL = `https://codeload.github.com/${REPO}/zip/refs/heads/${BRANCH}`
+const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`
 const INITIAL_DELAY_MS = 10_000
 const INTERVAL_MS = 30 * 60 * 1000 // 30 分钟
-const PER_PAGE = 5
 
 let timer: NodeJS.Timeout | null = null
-let lastKnownSha = ''
+let lastKnownVersion = ''
 let isChecking = false
 let isDownloading = false
 
-interface GitHubCommit {
-  sha: string
-  commit: {
-    message: string
-    author: { name: string; date: string }
-  }
+interface GitHubRelease {
+  id: number
+  tag_name: string
+  name: string
+  body: string
+  published_at: string
   html_url: string
+  assets: Array<{
+    id: number
+    name: string
+    size: number
+    browser_download_url: string
+    content_type: string
+  }>
 }
 
-async function fetchLatestCommits(): Promise<GitHubCommit[]> {
-  // Electron 31 内置 fetch
-  const url = `${COMMITS_API}?per_page=${PER_PAGE}`
-  const res = await fetch(url, {
+// 从 package.json 读取当前版本
+function getLocalVersion(): string {
+  try {
+    const pkgPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'app.asar', 'package.json')
+      : path.join(__dirname, '..', 'package.json')
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'))
+    return (pkg.version || '0.0.0').replace(/^v/, '')
+  } catch (e) {
+    console.error('[updater] 读取本地版本失败:', e)
+    return '0.0.0'
+  }
+}
+
+// 简单的语义版本比较（支持 1.0.0 / 1.2.3 / 1.10.0 等）
+function compareVersions(a: string, b: string): number {
+  const pa = a.replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0)
+  const pb = b.replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const va = pa[i] || 0
+    const vb = pb[i] || 0
+    if (va > vb) return 1
+    if (va < vb) return -1
+  }
+  return 0
+}
+
+async function fetchLatestRelease(): Promise<GitHubRelease | null> {
+  const res = await fetch(RELEASES_API, {
     headers: {
       'Accept': 'application/vnd.github+json',
       'User-Agent': 'ai-novel-writer-updater'
     }
   })
+  if (res.status === 404) return null // 还没有 release
   if (!res.ok) throw new Error(`GitHub API ${res.status}`)
-  const data = await res.json() as GitHubCommit[]
-  return Array.isArray(data) ? data : [data as any]
+  return await res.json() as GitHubRelease
 }
 
 function getSettings() {
@@ -59,36 +87,34 @@ function getSettings() {
   const s: any = db.data.settings || {}
   // 兼容老数据
   if (s.autoUpdateCheck === undefined) s.autoUpdateCheck = true
-  if (!s.lastCommitSha) s.lastCommitSha = ''
+  if (!s.lastKnownVersion) s.lastKnownVersion = ''
   return s
 }
 
-function persistSha(sha: string) {
+function persistVersion(version: string) {
   const db = getDB()
   if (!db.data.settings) db.data.settings = {} as any
-  ;(db.data.settings as any).lastCommitSha = sha
-  // 异步写入，不阻塞
-  db.write().catch(err => console.error('[updater] 写入 sha 失败:', err))
+  ;(db.data.settings as any).lastKnownVersion = version
+  db.write().catch(err => console.error('[updater] 写入版本号失败:', err))
 }
 
 function firstLine(msg: string): string {
   return (msg || '').split('\n')[0].trim()
 }
 
-function notifyUpdate(newSha: string, commit: GitHubCommit) {
+function notifyUpdate(release: GitHubRelease) {
   // 1. 系统原生通知
   if (Notification.isSupported()) {
     const notif = new Notification({
       title: 'AI 写小说 · 发现新版本',
-      body: `${firstLine(commit.commit.message)}\n点击立即更新`,
+      body: `${release.name || release.tag_name}\n点击立即更新`,
       silent: false
     })
     notif.on('click', () => {
-      // 通知点击也触发前端弹窗
       const wins = BrowserWindow.getAllWindows()
       for (const w of wins) {
         try {
-          w.webContents.send('updater:available', buildPayload(newSha, commit))
+          w.webContents.send('updater:available', buildPayload(release))
         } catch (e) {
           console.error('[updater] 推送渲染进程失败:', e)
         }
@@ -99,7 +125,7 @@ function notifyUpdate(newSha: string, commit: GitHubCommit) {
 
   // 2. 通知渲染进程弹对话框
   const wins = BrowserWindow.getAllWindows()
-  const payload = buildPayload(newSha, commit)
+  const payload = buildPayload(release)
   for (const w of wins) {
     try {
       w.webContents.send('updater:available', payload)
@@ -109,40 +135,47 @@ function notifyUpdate(newSha: string, commit: GitHubCommit) {
   }
 }
 
-function buildPayload(newSha: string, commit: GitHubCommit) {
+function buildPayload(release: GitHubRelease) {
+  // 选最大的资产作为下载目标（通常是 Setup.exe，约 90MB；免安装版 172MB）
+  const setupAsset = release.assets.find(a => /setup/i.test(a.name)) || release.assets[0]
   return {
-    sha: newSha,
-    message: commit.commit.message,
-    author: commit.commit.author?.name || '',
-    date: commit.commit.author?.date || '',
-    url: commit.html_url || ''
+    version: release.tag_name,
+    name: release.name || release.tag_name,
+    notes: release.body || '',
+    date: release.published_at || '',
+    url: release.html_url || '',
+    downloadUrl: setupAsset?.browser_download_url || '',
+    downloadSize: setupAsset?.size || 0,
+    downloadName: setupAsset?.name || ''
   }
 }
 
-async function checkOnce(opts: { silent?: boolean } = {}): Promise<{ updated: boolean; sha?: string; commit?: GitHubCommit }> {
+async function checkOnce(opts: { silent?: boolean } = {}): Promise<{ updated: boolean; version?: string; release?: GitHubRelease }> {
   if (isChecking) return { updated: false }
   isChecking = true
   try {
-    const commits = await fetchLatestCommits()
-    if (!commits.length) return { updated: false }
-    const latest = commits[0]
+    const release = await fetchLatestRelease()
+    if (!release) return { updated: false }
+    const remoteVersion = release.tag_name.replace(/^v/, '')
+    const localVersion = getLocalVersion()
     const s = getSettings()
-    // 首次启动：只记录 SHA，不弹提示
-    if (!s.lastCommitSha) {
-      lastKnownSha = latest.sha
-      persistSha(latest.sha)
-      return { updated: false, sha: latest.sha, commit: latest }
+    // 首次启动：只记录版本号，不弹提示
+    if (!s.lastKnownVersion) {
+      lastKnownVersion = remoteVersion
+      persistVersion(remoteVersion)
+      return { updated: false, version: remoteVersion, release }
     }
-    if (latest.sha !== s.lastCommitSha) {
-      lastKnownSha = latest.sha
-      persistSha(latest.sha)
+    // 远程版本号比本地高，且比上次记录的高 → 有更新
+    if (compareVersions(remoteVersion, localVersion) > 0) {
+      lastKnownVersion = remoteVersion
+      persistVersion(remoteVersion)
       if (!opts.silent) {
-        notifyUpdate(latest.sha, latest)
+        notifyUpdate(release)
       }
-      return { updated: true, sha: latest.sha, commit: latest }
+      return { updated: true, version: remoteVersion, release }
     }
-    lastKnownSha = latest.sha
-    return { updated: false, sha: latest.sha, commit: latest }
+    lastKnownVersion = remoteVersion
+    return { updated: false, version: remoteVersion, release }
   } catch (e) {
     console.error('[updater] 检查失败:', e)
     return { updated: false }
@@ -152,9 +185,9 @@ async function checkOnce(opts: { silent?: boolean } = {}): Promise<{ updated: bo
 }
 
 /**
- * 下载 main 分支 zip 包并自动重启应用
+ * 从最新 Release 下载 Setup.exe 并启动安装
  * - 通过 IPC 推送进度（0-100）
- * - 下载完成后退出当前进程并启动新实例
+ * - 下载完成后用 shell.openPath 启动安装程序，并退出当前应用
  */
 export async function downloadAndRestart(): Promise<{ success: boolean; error?: string }> {
   if (isDownloading) return { success: false, error: '正在下载中' }
@@ -170,20 +203,26 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
   }
 
   try {
-    sendProgress(0, '正在准备下载...')
+    sendProgress(0, '正在查询最新版本...')
+
+    // 获取最新 release 信息
+    const release = await fetchLatestRelease()
+    if (!release) throw new Error('未找到任何发布版本')
+    const setupAsset = release.assets.find(a => /setup/i.test(a.name)) || release.assets[0]
+    if (!setupAsset) throw new Error('该版本未上传可下载的文件')
+
+    sendProgress(5, `正在下载 ${setupAsset.name}（${(setupAsset.size / 1024 / 1024).toFixed(2)} MB）...`)
 
     // 创建缓存目录
     const cacheDir = path.join(app.getPath('userData'), 'update-cache')
     if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
-    const zipPath = path.join(cacheDir, `update-${Date.now()}.zip`)
-
-    sendProgress(5, '正在连接服务器...')
+    const savePath = path.join(cacheDir, setupAsset.name)
 
     // 使用 fetch 流式下载（Electron 31 内置）
-    const resp = await fetch(ZIP_URL, {
+    const resp = await fetch(setupAsset.browser_download_url, {
       headers: {
         'User-Agent': 'ai-novel-writer-updater',
-        'Accept': 'application/zip'
+        'Accept': 'application/octet-stream'
       },
       redirect: 'follow'
     })
@@ -191,17 +230,16 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
     if (!resp.body) throw new Error('下载失败：无响应体')
 
     const totalStr = resp.headers.get('content-length') || ''
-    const total = parseInt(totalStr, 10) || 0
+    const total = parseInt(totalStr, 10) || setupAsset.size
 
-    sendProgress(10, `开始下载${total ? `（共 ${(total / 1024 / 1024).toFixed(2)} MB）` : '...'}...`)
+    sendProgress(10, `开始下载（共 ${(total / 1024 / 1024).toFixed(2)} MB）...`)
 
     // Node stream 写入文件
-    const fileStream = fs.createWriteStream(zipPath)
+    const fileStream = fs.createWriteStream(savePath)
     const reader = Readable.fromWeb(resp.body as any)
 
     let received = 0
     let lastPct = 10
-    const CHUNK_COUNT_LIMIT = 1000 // 防止过频推送
 
     await new Promise<void>((resolve, reject) => {
       let chunkIndex = 0
@@ -209,7 +247,6 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
         received += chunk.length
         fileStream.write(chunk)
         chunkIndex++
-        // 推送进度
         if (total > 0) {
           const pct = 10 + Math.floor((received / total) * 85)
           if (pct > lastPct || chunkIndex % 50 === 0) {
@@ -239,24 +276,26 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
     })
 
     // 验证文件大小
-    const stat = fs.statSync(zipPath)
+    const stat = fs.statSync(savePath)
     if (stat.size < 1000) {
-      throw new Error('下载文件过小，可能不是有效的更新包')
+      throw new Error('下载文件过小，可能不是有效的安装包')
     }
 
-    sendProgress(98, '下载完成，正在准备重启...')
+    sendProgress(98, '下载完成，正在启动安装程序...')
 
     // 等待 800ms 让前端显示完成状态
     await new Promise(r => setTimeout(r, 800))
 
-    sendProgress(100, '更新已就绪，应用即将重启...')
+    sendProgress(100, '安装程序已启动，请按提示完成安装')
 
     // 等待 500ms 让前端看到 100%
     await new Promise(r => setTimeout(r, 500))
 
-    // 重启应用（app.relaunch 会启动新进程，app.exit(0) 退出当前进程）
-    // 注意：直接重启应用本身，下载的 zip 包保存在 userData/update-cache/ 供后续使用
-    app.relaunch()
+    // 启动安装程序（用户需要按提示点下一步）
+    // 安装程序会替换旧版本，安装完成后用户重新打开即可
+    await shell.openPath(savePath)
+
+    // 退出当前应用，让安装程序可以替换文件
     app.exit(0)
 
     return { success: true }
@@ -270,17 +309,16 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
 }
 
 export function startUpdater() {
-  // 立即初始化 lastKnownSha（不阻塞）
+  // 立即初始化 lastKnownVersion（不阻塞）
   try {
     const s = getSettings()
-    lastKnownSha = s.lastCommitSha || ''
+    lastKnownVersion = s.lastKnownVersion || ''
   } catch {}
 
   setTimeout(async () => {
     const s = getSettings()
     if (s.autoUpdateCheck === false) return
     await checkOnce({ silent: false })
-    // 启动定时器
     if (timer) clearInterval(timer)
     timer = setInterval(async () => {
       const cur = getSettings()
@@ -289,7 +327,7 @@ export function startUpdater() {
     }, INTERVAL_MS)
   }, INITIAL_DELAY_MS)
 
-  console.log('[updater] 已启动，10 秒后首次检查 GitHub 更新')
+  console.log('[updater] 已启动，10 秒后首次检查 GitHub Release 更新')
 }
 
 export function stopUpdater() {

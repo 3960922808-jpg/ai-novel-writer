@@ -151,7 +151,7 @@ app.whenReady().then(async () => {
     // 手动检查更新
     ipcMain.handle('updater:check', async () => {
       const r = await checkOnce({ silent: false })
-      return { updated: r.updated, sha: r.sha || '', message: r.commit?.commit?.message || '' }
+      return { updated: r.updated, version: r.version || '', releaseName: r.release?.name || '' }
     })
     // 下载并自动重启
     ipcMain.handle('updater:download', async () => {
