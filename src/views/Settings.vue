@@ -163,6 +163,32 @@
         </el-form-item>
       </div>
 
+      <div class="card section-card">
+        <div class="section-title">应用更新</div>
+
+        <el-form-item label="自动检查">
+          <el-switch v-model="form.autoUpdateCheck" />
+          <span class="text-faint text-xs" style="margin-left: 12px">
+            启动后 10 秒检查一次，之后每 30 分钟轮询 GitHub 仓库
+          </span>
+        </el-form-item>
+
+        <el-form-item label="仓库地址">
+          <el-link type="primary" href="https://github.com/3960922808-jpg/ai-novel-writer" target="_blank">
+            github.com/3960922808-jpg/ai-novel-writer
+          </el-link>
+        </el-form-item>
+
+        <el-form-item label="手动检查">
+          <el-button type="primary" :loading="checking" :icon="Refresh" @click="checkNow">
+            立即检查更新
+          </el-button>
+          <span v-if="checkResult" class="text-faint text-xs" style="margin-left: 12px">
+            {{ checkResult }}
+          </span>
+        </el-form-item>
+      </div>
+
       <div class="actions">
         <el-button type="primary" :icon="Check" :loading="saving" @click="save">保存设置</el-button>
       </div>
@@ -175,7 +201,7 @@ import { ref, reactive, computed, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  ArrowLeft, Check, Plus, Sunny, Moon
+  ArrowLeft, Check, Plus, Sunny, Moon, Refresh
 } from '@element-plus/icons-vue'
 import { useSettingsStore } from '@/stores/settings'
 import type { AppSettings } from '@/types'
@@ -196,10 +222,37 @@ const form = reactive<AppSettings>({
   autoSaveInterval: 30,
   dataDir: '',
   searchProvider: 'duckduckgo',
-  searchApiKey: ''
+  searchApiKey: '',
+  autoUpdateCheck: true,
+  lastCommitSha: ''
 })
 
 const modelOptions = computed(() => settingsStore.availableModels())
+
+const checking = ref(false)
+const checkResult = ref('')
+
+async function checkNow() {
+  checking.value = true
+  checkResult.value = ''
+  try {
+    const r = await window.api.updater.check()
+    if (r?.updated) {
+      checkResult.value = `发现新版本：${(r.message || '').split('\n')[0]}`
+      ElMessage.success('发现新版本，请查看更新提示')
+    } else if (r?.sha) {
+      checkResult.value = `已是最新（${r.sha.slice(0, 7)}）`
+      ElMessage.info('当前已是最新版本')
+    } else {
+      checkResult.value = '检查失败，请稍后重试'
+    }
+  } catch (e: any) {
+    checkResult.value = '检查失败：' + (e?.message || '未知错误')
+    ElMessage.error(checkResult.value)
+  } finally {
+    checking.value = false
+  }
+}
 
 const modelInputVisible = ref<Record<number, boolean>>({})
 const modelInputValue = ref<Record<number, string>>({})
@@ -227,6 +280,8 @@ function fillForm(s: AppSettings) {
   // 老数据兼容
   if (!form.searchProvider) form.searchProvider = 'duckduckgo'
   if (!form.searchApiKey) form.searchApiKey = ''
+  if (form.autoUpdateCheck === undefined || form.autoUpdateCheck === null) form.autoUpdateCheck = true
+  if (!form.lastCommitSha) form.lastCommitSha = ''
 }
 
 function onThemeChange() {
@@ -275,7 +330,8 @@ async function save() {
       autoSaveInterval: form.autoSaveInterval,
       dataDir: form.dataDir,
       searchProvider: form.searchProvider,
-      searchApiKey: form.searchApiKey
+      searchApiKey: form.searchApiKey,
+      autoUpdateCheck: form.autoUpdateCheck
     })
     ElMessage.success('已保存')
   } catch (e: any) {

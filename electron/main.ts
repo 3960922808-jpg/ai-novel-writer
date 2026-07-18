@@ -8,6 +8,7 @@ import { registerExportIPC } from './ipc/export'
 import { registerFileIPC } from './ipc/files'
 import { registerSearchIPC } from './ipc/search'
 import { initDB } from './lib/db'
+import { startUpdater, checkOnce } from './lib/updater'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -147,11 +148,22 @@ app.whenReady().then(async () => {
     registerExportIPC()
     registerFileIPC()
     registerSearchIPC()
+    // 手动检查更新
+    ipcMain.handle('updater:check', async () => {
+      const r = await checkOnce({ silent: false })
+      return { updated: r.updated, sha: r.sha || '', message: r.commit?.commit?.message || '' }
+    })
     console.log('[main] IPC 已注册')
   } catch (e) {
     console.error('[main] IPC 注册失败:', e)
   }
   createWindow()
+  // 启动 GitHub 更新检查
+  try {
+    startUpdater()
+  } catch (e) {
+    console.error('[main] 更新检查器启动失败:', e)
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

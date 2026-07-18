@@ -197,6 +197,9 @@ export interface AppSettings {
   // 联网搜索配置
   searchProvider: 'duckduckgo' | 'tavily' | 'serper'
   searchApiKey: string
+  // 自动更新检查
+  autoUpdateCheck: boolean
+  lastCommitSha: string
 }
 
 /** Skill（技能）— 比普通提示词更高级的 AI 工作流 */

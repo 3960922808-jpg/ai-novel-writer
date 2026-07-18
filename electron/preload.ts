@@ -62,6 +62,25 @@ const api = {
     web: (req: any) => ipcRenderer.invoke('search:web', req)
   },
 
+  // ====== 更新检查 ======
+  updater: {
+    // 手动触发一次检查
+    check: () => ipcRenderer.invoke('updater:check'),
+    // 监听"发现新版本"事件
+    onUpdateAvailable: (cb: (info: {
+      sha: string
+      message: string
+      author: string
+      date: string
+      url: string
+      releasesUrl: string
+    }) => void) => {
+      const listener = (_e: any, info: any) => cb(info)
+      ipcRenderer.on('updater:available', listener)
+      return () => ipcRenderer.removeListener('updater:available', listener)
+    }
+  },
+
   // ====== 菜单事件 ======
   onMenu: (channel: string, cb: () => void) => {
     const listener = () => cb()

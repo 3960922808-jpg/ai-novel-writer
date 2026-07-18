@@ -127,7 +127,9 @@ export function registerStoreIPC() {
         autoSaveInterval: 30,
         dataDir: '',
         searchProvider: 'duckduckgo',
-        searchApiKey: ''
+        searchApiKey: '',
+        autoUpdateCheck: true,
+        lastCommitSha: ''
       }
       await db.write()
     }
@@ -135,7 +137,15 @@ export function registerStoreIPC() {
     if (db.data.settings && !('searchProvider' in db.data.settings)) {
       db.data.settings.searchProvider = 'duckduckgo'
       db.data.settings.searchApiKey = ''
-      await db.write()
+    }
+    if (db.data.settings && db.data.settings.autoUpdateCheck === undefined) {
+      db.data.settings.autoUpdateCheck = true
+      db.data.settings.lastCommitSha = ''
+    }
+    if (db.data.settings) {
+      if (!('searchProvider' in db.data.settings) || db.data.settings.autoUpdateCheck === undefined) {
+        await db.write()
+      }
     }
     return db.data.settings
   })
