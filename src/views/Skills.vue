@@ -6,7 +6,9 @@
           <el-icon style="vertical-align: -3px; margin-right: 6px"><MagicStick /></el-icon>
           技能库（Skills）
         </h1>
-        <p class="text-muted text-sm" style="margin: 6px 0 0">技能 = system + user 双模板 + 推荐参数，比普通提示词更强大的 AI 工作流</p>
+        <p class="text-muted text-sm" style="margin: 6px 0 0">
+          技能在「写作」页的右侧 AI 对话输入框中通过 <code class="slash-code">/</code> 触发调用。这里只用于管理与编辑技能。
+        </p>
       </div>
       <el-button type="primary" :icon="Plus" @click="openCreate">添加技能</el-button>
     </div>
@@ -55,7 +57,6 @@
           <el-tag v-for="v in s.variables" :key="v" size="small" effect="plain" class="var-tag" v-text="varLabel(v)" />
         </div>
         <div class="skill-footer">
-          <el-button size="small" type="primary" :icon="Promotion" @click="openRun(s)">运行</el-button>
           <el-button size="small" :icon="Edit" @click="openEdit(s)">编辑</el-button>
           <el-button size="small" :icon="CopyDocument" @click="duplicate(s)">复制</el-button>
           <el-button size="small" type="danger" :icon="Delete" @click="removeSkill(s)" plain>删除</el-button>
@@ -113,7 +114,7 @@
             v-model="editing.userPrompt"
             type="textarea"
             :rows="6"
-            placeholder="支持 {{变量}}，例如：请根据以下信息写战斗场景：\n角色：{{characters}}\n环境：{{env}}"
+            placeholder="支持 {{变量}}，例如：请根据以下信息写战斗场景：&#10;角色：{{characters}}&#10;环境：{{env}}"
           />
           <div class="text-faint text-xs" style="margin-top: 4px">
             自动识别的变量：
@@ -158,83 +159,6 @@
         <el-button type="primary" :loading="saving" @click="saveSkill">保存</el-button>
       </template>
     </el-dialog>
-
-    <!-- 运行技能对话框 -->
-    <el-dialog
-      v-model="runVisible"
-      :title="`运行技能：${running?.name || ''}`"
-      width="820px"
-      top="6vh"
-      :close-on-click-modal="false"
-    >
-      <div v-if="running" class="run-body">
-        <div class="run-desc text-muted text-sm">{{ running.description }}</div>
-        <el-divider />
-        <div v-if="running.variables && running.variables.length > 0">
-          <div class="section-title text-sm" style="margin-bottom: 10px">变量输入</div>
-          <el-form label-width="120px">
-            <el-form-item
-              v-for="v in running.variables"
-              :key="v"
-              :label="v"
-            >
-              <el-input
-                v-if="isLongVar(v)"
-                v-model="runVars[v]"
-                type="textarea"
-                :rows="4"
-                :placeholder="`请输入 ${v}`"
-              />
-              <el-input v-else v-model="runVars[v]" :placeholder="`请输入 ${v}`" />
-              <el-button
-                v-if="v === 'content' || v === 'context'"
-                text
-                size="small"
-                :icon="Document"
-                @click="fillFromChapter(v)"
-                style="margin-top: 4px"
-              >从当前章节填充</el-button>
-            </el-form-item>
-          </el-form>
-          <el-divider />
-        </div>
-        <div class="run-output">
-          <div class="section-title text-sm" style="margin-bottom: 10px">
-            <span>AI 输出</span>
-            <el-button
-              v-if="runResult"
-              text
-              size="small"
-              :icon="DocumentCopy"
-              @click="copyResult"
-              style="margin-left: 8px"
-            >复制</el-button>
-            <el-button
-              v-if="runResult"
-              text
-              size="small"
-              :icon="Plus"
-              @click="appendToChapter"
-              style="margin-left: 4px"
-            >追加到当前章节</el-button>
-          </div>
-          <div v-if="runStreaming" class="run-streaming">
-            <el-icon class="is-loading"><Loading /></el-icon>
-            <span class="text-muted">生成中...</span>
-          </div>
-          <div v-if="runResult" class="run-result">{{ runResult }}</div>
-          <div v-else-if="!runStreaming" class="run-empty text-faint text-sm">
-            点击"开始生成"运行技能
-          </div>
-        </div>
-      </div>
-      <template #footer>
-        <el-button @click="runVisible = false">关闭</el-button>
-        <el-button type="primary" :loading="runStreaming" :icon="Promotion" @click="runSkill">
-          {{ runResult ? '重新生成' : '开始生成' }}
-        </el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -242,21 +166,18 @@
 import { ref, computed, onMounted, markRaw } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  MagicStick, Plus, Search, Edit, Delete, CopyDocument, Promotion,
-  DocumentCopy, Document, Loading, Aim, ChatLineSquare, DataAnalysis,
+  MagicStick, Plus, Search, Edit, Delete, CopyDocument,
+  Aim, ChatLineSquare, DataAnalysis,
   CopyDocument as CopyDoc, EditPen, Setting, Collection, Timer,
   Connection, Trophy, Files, Download, Search as SearchIcon,
   Sunny, Moon, Star, Brush, Pointer, Lightning
 } from '@element-plus/icons-vue'
 import type { Skill } from '@/types'
 import { useProjectStore } from '@/stores/project'
-import { useSettingsStore } from '@/stores/settings'
 import { Skills as SkillsDB } from '@/services/db'
-import { streamChat, buildRequest, renderTemplate, extractVariables } from '@/services/ai'
+import { extractVariables } from '@/services/ai'
 
 const projectStore = useProjectStore()
-const settingsStore = useSettingsStore()
-
 const project = computed(() => projectStore.current)
 
 const skills = ref<Skill[]>([])
@@ -444,108 +365,6 @@ function iconBg(s: Skill) {
   for (let i = 0; i < s.name.length; i++) hash = (hash * 31 + s.name.charCodeAt(i)) | 0
   return colors[Math.abs(hash) % colors.length]
 }
-
-// ===== 运行技能 =====
-const runVisible = ref(false)
-const running = ref<Skill | null>(null)
-const runVars = ref<Record<string, string>>({})
-const runResult = ref('')
-const runStreaming = ref(false)
-
-function openRun(s: Skill) {
-  running.value = s
-  runVars.value = {}
-  runResult.value = ''
-  runStreaming.value = false
-  // 预填充默认值
-  if (s.variables) {
-    for (const v of s.variables) {
-      runVars.value[v] = ''
-    }
-  }
-  runVisible.value = true
-}
-
-function isLongVar(v: string) {
-  const long = ['content', 'context', 'excerpt', 'searchResults', 'imitationGuide', 'truth', 'characters', 'setup']
-  return long.includes(v)
-}
-
-async function fillFromChapter(v: string) {
-  const chapter = projectStore.chapters.find((c) => c.id === (projectStore as any).currentChapterId) || projectStore.chapters[0]
-  if (!chapter) {
-    ElMessage.warning('当前没有章节')
-    return
-  }
-  // 简易去 HTML
-  const text = (chapter.content || '').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim()
-  runVars.value[v] = text
-  ElMessage.success(`已填充「${chapter.title}」`)
-}
-
-async function runSkill() {
-  const s = running.value
-  if (!s) return
-  const project = projectStore.current
-  if (!project) {
-    ElMessage.warning('请先打开项目')
-    return
-  }
-  if (!settingsStore.settings) await settingsStore.load()
-  const model = s.recommendedModel || project.settings.model || settingsStore.settings!.defaultModel
-  const cfg = settingsStore.findProviderForModel(model)
-  if (!cfg?.apiKey) {
-    ElMessage.error('AI Key 未配置，请到设置中填写')
-    return
-  }
-  // 检查变量是否都填了
-  for (const v of s.variables || []) {
-    if (!runVars.value[v]?.trim()) {
-      ElMessage.warning(`请填写变量：${v}`)
-      return
-    }
-  }
-  const userContent = renderTemplate(s.userPrompt, runVars.value)
-  const req = buildRequest({
-    baseUrl: cfg.baseUrl,
-    apiKey: cfg.apiKey,
-    model,
-    messages: [
-      { role: 'system', content: s.systemPrompt || '你是一位资深小说家' },
-      { role: 'user', content: userContent }
-    ],
-    temperature: s.temperature ?? 0.8,
-    maxTokens: s.maxTokens ?? 2048
-  })
-  runResult.value = ''
-  runStreaming.value = true
-  try {
-    await streamChat(req, (chunk) => {
-      runResult.value += chunk
-    })
-  } catch (e: any) {
-    ElMessage.error('生成失败：' + (e?.message || ''))
-  } finally {
-    runStreaming.value = false
-  }
-}
-
-function copyResult() {
-  if (!runResult.value) return
-  navigator.clipboard.writeText(runResult.value).then(() => ElMessage.success('已复制'))
-}
-
-async function appendToChapter() {
-  if (!runResult.value) return
-  // 简化：跳转到编辑器 + 写入剪贴板提示
-  const chapter = projectStore.chapters[0]
-  if (!chapter) {
-    ElMessage.warning('当前没有章节')
-    return
-  }
-  await navigator.clipboard.writeText(runResult.value)
-  ElMessage.success('已复制到剪贴板，请到编辑器粘贴')
-}
 </script>
 
 <style scoped>
@@ -583,6 +402,15 @@ async function appendToChapter() {
 }
 .search-input:focus { border-color: var(--primary); background: var(--panel); }
 .count-tip { margin-left: auto; }
+.slash-code {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-family: monospace;
+  color: var(--primary);
+  font-weight: 600;
+}
 .skill-grid { margin-top: 4px; }
 .skill-card {
   padding: 16px;
@@ -646,26 +474,4 @@ async function appendToChapter() {
   align-items: center;
   gap: 8px;
 }
-.run-body { display: flex; flex-direction: column; gap: 12px; }
-.run-output {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px;
-  background: var(--panel-2);
-  min-height: 180px;
-}
-.run-streaming {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 0;
-}
-.run-result {
-  white-space: pre-wrap;
-  line-height: 1.8;
-  font-size: 14px;
-  max-height: 360px;
-  overflow: auto;
-}
-.run-empty { padding: 20px 0; text-align: center; }
 </style>
