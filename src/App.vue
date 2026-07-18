@@ -3,38 +3,72 @@
 
   <el-dialog
     v-model="updateDialogVisible"
-    title="发现新版本"
+    :title="downloadState === 'idle' ? '发现新版本' : (downloadState === 'done' ? '更新完成' : '正在更新')"
     width="520px"
     :close-on-click-modal="false"
+    :close-on-press-escape="false"
+    :show-close="downloadState !== 'downloading'"
     align-center
   >
     <div class="update-dialog">
-      <div class="update-headline">
-        <el-icon class="update-icon"><Upload /></el-icon>
-        <span>AI 写小说 有新版本可用</span>
-      </div>
-      <div class="update-meta">
-        <el-tag size="small">{{ shaShort }}</el-tag>
-        <span class="update-author">{{ updateInfo?.author }}</span>
-        <span class="update-date">{{ formatDate(updateInfo?.date) }}</span>
-      </div>
-      <div class="update-message">{{ firstLine(updateInfo?.message) }}</div>
-      <div class="update-tip">
-        点击下方按钮前往 GitHub Releases 下载最新版本，覆盖安装即可。
-      </div>
+      <!-- 信息展示阶段 -->
+      <template v-if="downloadState === 'idle'">
+        <div class="update-headline">
+          <el-icon class="update-icon"><Upload /></el-icon>
+          <span>AI 写小说 有新版本可用</span>
+        </div>
+        <div class="update-meta">
+          <el-tag size="small">{{ shaShort }}</el-tag>
+          <span class="update-author">{{ updateInfo?.author }}</span>
+          <span class="update-date">{{ formatDate(updateInfo?.date) }}</span>
+        </div>
+        <div class="update-message">{{ firstLine(updateInfo?.message) }}</div>
+        <div class="update-tip">
+          点击"立即更新"将自动下载最新版本并重启应用，无需手动操作。
+        </div>
+      </template>
+
+      <!-- 下载进度阶段 -->
+      <template v-if="downloadState === 'downloading'">
+        <div class="update-headline">
+          <el-icon class="update-icon is-loading" v-if="downloadPercent < 100"><Loading /></el-icon>
+          <el-icon class="update-icon" v-else><SuccessFilled /></el-icon>
+          <span>{{ downloadPercent >= 100 ? '下载完成，正在重启...' : '正在下载更新...' }}</span>
+        </div>
+        <el-progress
+          :percentage="downloadPercent"
+          :status="downloadPercent >= 100 ? 'success' : ''"
+          :stroke-width="10"
+          style="margin: 16px 0"
+        />
+        <div class="update-status text-muted">{{ downloadStatus }}</div>
+      </template>
+
+      <!-- 失败阶段 -->
+      <template v-if="downloadState === 'error'">
+        <div class="update-headline">
+          <el-icon class="update-icon error"><CircleCloseFilled /></el-icon>
+          <span>更新失败</span>
+        </div>
+        <div class="update-message error">{{ downloadStatus }}</div>
+        <div class="update-tip">请检查网络连接后重试，或稍后再试。</div>
+      </template>
     </div>
+
     <template #footer>
-      <el-button @click="updateDialogVisible = false">稍后再说</el-button>
-      <el-button type="primary" :icon="Download" @click="openReleases">
-        前往下载
+      <el-button v-if="downloadState === 'idle'" @click="updateDialogVisible = false">稍后再说</el-button>
+      <el-button v-if="downloadState === 'idle'" type="primary" :icon="Download" @click="startDownload">
+        立即更新
       </el-button>
+      <el-button v-if="downloadState === 'error'" @click="updateDialogVisible = false">关闭</el-button>
+      <el-button v-if="downloadState === 'error'" type="primary" @click="startDownload">重试</el-button>
     </template>
   </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { Upload, Download } from '@element-plus/icons-vue'
+import { Upload, Download, Loading, SuccessFilled, CircleCloseFilled } from '@element-plus/icons-vue'
 import { useSettingsStore } from '@/stores/settings'
 
 const settings = useSettingsStore()
@@ -45,14 +79,20 @@ interface UpdateInfo {
   author: string
   date: string
   url: string
-  releasesUrl: string
 }
 
 const updateDialogVisible = ref(false)
 const updateInfo = ref<UpdateInfo | null>(null)
 const shaShort = computed(() => (updateInfo.value?.sha || '').slice(0, 7))
 
+// 下载状态
+type DownloadState = 'idle' | 'downloading' | 'error' | 'done'
+const downloadState = ref<DownloadState>('idle')
+const downloadPercent = ref(0)
+const downloadStatus = ref('')
+
 let unsubUpdate: (() => void) | null = null
+let unsubProgress: (() => void) | null = null
 
 onMounted(async () => {
   try {
@@ -65,7 +105,23 @@ onMounted(async () => {
     if (window.api?.updater?.onUpdateAvailable) {
       unsubUpdate = window.api.updater.onUpdateAvailable((info: UpdateInfo) => {
         updateInfo.value = info
+        downloadState.value = 'idle'
+        downloadPercent.value = 0
+        downloadStatus.value = ''
         updateDialogVisible.value = true
+      })
+    }
+    if (window.api?.updater?.onProgress) {
+      unsubProgress = window.api.updater.onProgress((p: { percent: number; status: string }) => {
+        downloadPercent.value = p.percent < 0 ? 0 : p.percent
+        downloadStatus.value = p.status
+        if (p.percent < 0) {
+          downloadState.value = 'error'
+        } else if (p.percent >= 100) {
+          downloadState.value = 'done'
+        } else {
+          downloadState.value = 'downloading'
+        }
       })
     }
   } catch (e) {
@@ -75,6 +131,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (unsubUpdate) unsubUpdate()
+  if (unsubProgress) unsubProgress()
 })
 
 function firstLine(s?: string) {
@@ -88,10 +145,21 @@ function formatDate(s?: string) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-function openReleases() {
-  const url = updateInfo.value?.releasesUrl || 'https://github.com/3960922808-jpg/ai-novel-writer/releases/latest'
-  window.open(url, '_blank')
-  updateDialogVisible.value = false
+async function startDownload() {
+  downloadState.value = 'downloading'
+  downloadPercent.value = 0
+  downloadStatus.value = '正在准备下载...'
+  try {
+    const r = await window.api.updater.download()
+    if (!r.success) {
+      downloadState.value = 'error'
+      downloadStatus.value = r.error || '下载失败'
+    }
+    // 成功的话，应用会自动重启，无需处理
+  } catch (e: any) {
+    downloadState.value = 'error'
+    downloadStatus.value = e?.message || '下载失败'
+  }
 }
 </script>
 
@@ -111,6 +179,9 @@ function openReleases() {
   color: var(--el-color-primary);
   font-size: 22px;
 }
+.update-icon.error { color: var(--el-color-danger); }
+.update-icon.is-loading { animation: rotate 1.2s linear infinite; }
+@keyframes rotate { to { transform: rotate(360deg); } }
 .update-meta {
   display: flex;
   align-items: center;
@@ -131,9 +202,18 @@ function openReleases() {
   margin-bottom: 14px;
   border-left: 3px solid var(--el-color-primary);
 }
+.update-message.error {
+  border-left-color: var(--el-color-danger);
+  color: var(--el-color-danger);
+}
 .update-tip {
   color: var(--el-text-color-secondary);
   font-size: 12px;
   line-height: 1.6;
+}
+.update-status {
+  font-size: 12px;
+  text-align: center;
+  padding: 4px 0;
 }
 </style>

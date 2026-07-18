@@ -8,7 +8,7 @@ import { registerExportIPC } from './ipc/export'
 import { registerFileIPC } from './ipc/files'
 import { registerSearchIPC } from './ipc/search'
 import { initDB } from './lib/db'
-import { startUpdater, checkOnce } from './lib/updater'
+import { startUpdater, checkOnce, downloadAndRestart } from './lib/updater'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -152,6 +152,11 @@ app.whenReady().then(async () => {
     ipcMain.handle('updater:check', async () => {
       const r = await checkOnce({ silent: false })
       return { updated: r.updated, sha: r.sha || '', message: r.commit?.commit?.message || '' }
+    })
+    // 下载并自动重启
+    ipcMain.handle('updater:download', async () => {
+      const r = await downloadAndRestart()
+      return r
     })
     console.log('[main] IPC 已注册')
   } catch (e) {

@@ -169,14 +169,8 @@
         <el-form-item label="自动检查">
           <el-switch v-model="form.autoUpdateCheck" />
           <span class="text-faint text-xs" style="margin-left: 12px">
-            启动后 10 秒检查一次，之后每 30 分钟轮询 GitHub 仓库
+            启动后 10 秒检查一次，之后每 30 分钟轮询一次
           </span>
-        </el-form-item>
-
-        <el-form-item label="仓库地址">
-          <el-link type="primary" href="https://github.com/3960922808-jpg/ai-novel-writer" target="_blank">
-            github.com/3960922808-jpg/ai-novel-writer
-          </el-link>
         </el-form-item>
 
         <el-form-item label="手动检查">

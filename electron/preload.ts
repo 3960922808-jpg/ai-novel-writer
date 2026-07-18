@@ -66,6 +66,8 @@ const api = {
   updater: {
     // 手动触发一次检查
     check: () => ipcRenderer.invoke('updater:check'),
+    // 下载更新并自动重启
+    download: () => ipcRenderer.invoke('updater:download'),
     // 监听"发现新版本"事件
     onUpdateAvailable: (cb: (info: {
       sha: string
@@ -73,11 +75,16 @@ const api = {
       author: string
       date: string
       url: string
-      releasesUrl: string
     }) => void) => {
       const listener = (_e: any, info: any) => cb(info)
       ipcRenderer.on('updater:available', listener)
       return () => ipcRenderer.removeListener('updater:available', listener)
+    },
+    // 监听下载进度
+    onProgress: (cb: (p: { percent: number; status: string }) => void) => {
+      const listener = (_e: any, p: any) => cb(p)
+      ipcRenderer.on('updater:progress', listener)
+      return () => ipcRenderer.removeListener('updater:progress', listener)
     }
   },
 
