@@ -238,7 +238,7 @@ function parseMarkdownWithFrontmatter(content: string): { frontmatter: Record<st
         if (/^["'].*["']$/.test(val)) val = val.slice(1, -1)
         // 数组
         if (/^\[.*\]$/.test(val)) {
-          val = val.slice(1, -1).split(',').map(s => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean)
+          val = val.slice(1, -1).split(',').map((s: string) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean)
         }
         fm[key] = val
       }
