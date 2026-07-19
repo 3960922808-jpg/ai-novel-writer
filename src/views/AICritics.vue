@@ -8,7 +8,10 @@
         </h1>
         <p class="text-muted text-sm" style="margin: 6px 0 0">多模型交叉评审，避免单一模型盲点</p>
       </div>
-      <el-button type="primary" :icon="MagicStick" @click="openCriticDialog">评审章节</el-button>
+      <div class="flex gap-2">
+        <el-button :icon="ArrowLeft" @click="$router.push({ name: 'dashboard' })">返回</el-button>
+        <el-button type="primary" :icon="MagicStick" @click="openCriticDialog">评审章节</el-button>
+      </div>
     </div>
 
     <!-- 顶部汇总卡片 -->
@@ -161,7 +164,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ChatLineSquare, Delete, MagicStick, Warning, Check } from '@element-plus/icons-vue'
+import { ChatLineSquare, Delete, MagicStick, Warning, Check, ArrowLeft } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { useSettingsStore } from '@/stores/settings'
 import * as db from '@/services/db'

@@ -8,9 +8,12 @@
         </h1>
         <p class="text-muted text-sm" style="margin: 6px 0 0">维护 7 个核心文件，保证全书角色/伏笔/时间线/数值一致性</p>
       </div>
-      <el-button type="primary" :icon="MagicStick" :loading="aiAllRunning" @click="aiUpdateAll">
-        AI 更新所有真相文件
-      </el-button>
+      <div class="flex gap-2">
+        <el-button :icon="ArrowLeft" @click="$router.push({ name: 'dashboard' })">返回</el-button>
+        <el-button type="primary" :icon="MagicStick" :loading="aiAllRunning" @click="aiUpdateAll">
+          AI 更新所有真相文件
+        </el-button>
+      </div>
     </div>
 
     <!-- 整体进度 -->
@@ -100,7 +103,7 @@ import { ref, computed, reactive, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Files, Edit, MagicStick, Warning, Check,
-  Aim, User, Connection, Document, List, Sunny, Wallet
+  Aim, User, Connection, Document, List, Sunny, Wallet, ArrowLeft
 } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { useSettingsStore } from '@/stores/settings'

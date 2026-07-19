@@ -2,7 +2,10 @@
   <div class="page" v-if="project">
     <div class="page-header">
       <h1 class="page-title">写作目标</h1>
-      <el-button :icon="DataLine" @click="genMock">模拟数据</el-button>
+      <div class="flex gap-2">
+        <el-button :icon="ArrowLeft" @click="$router.push({ name: 'dashboard' })">返回</el-button>
+        <el-button :icon="DataLine" @click="genMock">模拟数据</el-button>
+      </div>
     </div>
 
     <div class="grid grid-3" style="margin-bottom: 20px">
@@ -139,7 +142,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Trophy, Calendar, Setting, DataLine } from '@element-plus/icons-vue'
+import { Trophy, Calendar, Setting, DataLine, ArrowLeft } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { Goals } from '@/services/db'
 import type { WritingGoal } from '@/types'

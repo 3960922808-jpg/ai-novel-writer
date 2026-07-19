@@ -12,6 +12,7 @@
         </p>
       </div>
       <div class="flex gap-2">
+        <el-button v-if="!project" :icon="ArrowLeft" @click="$router.push('/')">返回书架</el-button>
         <el-button :icon="FolderOpened" @click="importFromFolder">从文件夹导入</el-button>
         <el-button type="primary" :icon="Plus" @click="openCreate">添加技能</el-button>
       </div>
@@ -174,7 +175,7 @@ import {
   Aim, ChatLineSquare, DataAnalysis,
   CopyDocument as CopyDoc, EditPen, Setting, Collection, Timer,
   Connection, Trophy, Files, Download, Search as SearchIcon,
-  Sunny, Moon, Star, Brush, Pointer, Lightning, FolderOpened
+  Sunny, Moon, Star, Brush, Pointer, Lightning, FolderOpened, ArrowLeft
 } from '@element-plus/icons-vue'
 import type { Skill } from '@/types'
 import { useProjectStore } from '@/stores/project'

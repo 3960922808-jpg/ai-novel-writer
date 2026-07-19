@@ -3,6 +3,7 @@
     <div class="page-header">
       <h1 class="page-title">提示词库</h1>
       <div class="flex gap-2">
+        <el-button :icon="ArrowLeft" @click="$router.push({ name: 'dashboard' })">返回</el-button>
         <el-input
           v-model="search"
           :prefix-icon="Search"
@@ -170,7 +171,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete, Search, MagicStick } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Search, MagicStick, ArrowLeft } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { useSettingsStore } from '@/stores/settings'
 import { Prompts } from '@/services/db'

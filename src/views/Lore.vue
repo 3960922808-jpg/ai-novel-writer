@@ -3,6 +3,7 @@
     <div class="page-header">
       <h1 class="page-title">世界观设定</h1>
       <div class="flex gap-2">
+        <el-button :icon="ArrowLeft" @click="$router.push({ name: 'dashboard' })">返回</el-button>
         <el-select v-model="selectedCategory" placeholder="分类筛选" style="width: 160px" clearable>
           <el-option label="全部分类" value="" />
           <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
@@ -108,7 +109,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete, Collection, Files } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Collection, Files, ArrowLeft } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { Lore } from '@/services/db'
 import type { LoreEntry } from '@/types'

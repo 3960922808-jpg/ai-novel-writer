@@ -9,6 +9,7 @@
         <p class="text-muted text-sm" style="margin: 6px 0 0">上传小说文件，AI 自动拆解该作者的写作手法，生成可复用的文风档案</p>
       </div>
       <div class="flex gap-2">
+        <el-button :icon="ArrowLeft" @click="$router.push({ name: 'dashboard' })">返回</el-button>
         <el-button :icon="Files" @click="loadProfiles">我的档案</el-button>
         <el-button type="primary" :icon="Upload" @click="pickFiles">上传小说</el-button>
       </div>
@@ -196,7 +197,7 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   CopyDocument, Upload, Document, Delete, Plus, MagicStick,
-  Files, Check, Right, Loading, DocumentCopy
+  Files, Check, Right, Loading, DocumentCopy, ArrowLeft
 } from '@element-plus/icons-vue'
 import type { StyleProfile } from '@/types'
 import { useProjectStore } from '@/stores/project'

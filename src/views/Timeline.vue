@@ -3,6 +3,7 @@
     <div class="page-header">
       <h1 class="page-title">时间线</h1>
       <div class="flex gap-2 items-center">
+        <el-button :icon="ArrowLeft" @click="$router.push({ name: 'dashboard' })">返回</el-button>
         <el-select v-model="filter" placeholder="全部重要程度" style="width: 150px">
           <el-option label="全部" value="" />
           <el-option label="关键" value="关键" />
@@ -96,7 +97,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete, Timer, Document, User } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Timer, Document, User, ArrowLeft } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import * as db from '@/services/db'
 import type { TimelineEvent, ID } from '@/types'

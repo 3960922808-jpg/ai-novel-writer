@@ -3,6 +3,7 @@
     <div class="page-header">
       <h1 class="page-title">章节列表</h1>
       <div class="flex gap-2">
+        <el-button :icon="ArrowLeft" @click="$router.push({ name: 'dashboard' })">返回</el-button>
         <el-button :icon="MagicStick" :loading="autoGenerating" @click="autoGenerate">AI 生成分章大纲</el-button>
         <el-button type="primary" :icon="Plus" @click="addChapter">新建章节</el-button>
       </div>
@@ -94,7 +95,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, MoreFilled, Sort, MagicStick, Document } from '@element-plus/icons-vue'
+import { Plus, Edit, MoreFilled, Sort, MagicStick, Document, ArrowLeft } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { useSettingsStore } from '@/stores/settings'
 import * as db from '@/services/db'

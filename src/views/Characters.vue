@@ -3,6 +3,7 @@
     <div class="page-header">
       <h1 class="page-title">角色库</h1>
       <div class="flex gap-2">
+        <el-button :icon="ArrowLeft" @click="$router.push({ name: 'dashboard' })">返回</el-button>
         <el-input
           v-model="keyword"
           placeholder="搜索角色..."
@@ -210,7 +211,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete, Search, User, MagicStick, Check } from '@element-plus/icons-vue'
+import { Plus, Delete, Search, User, MagicStick, Check, ArrowLeft } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { useSettingsStore } from '@/stores/settings'
 import { Characters, Prompts } from '@/services/db'

@@ -2,7 +2,10 @@
   <div class="page" v-if="project">
     <div class="page-header">
       <h1 class="page-title">地点</h1>
-      <el-button type="primary" :icon="Plus" @click="createLocation">新建地点</el-button>
+      <div class="flex gap-2">
+        <el-button :icon="ArrowLeft" @click="$router.push({ name: 'dashboard' })">返回</el-button>
+        <el-button type="primary" :icon="Plus" @click="createLocation">新建地点</el-button>
+      </div>
     </div>
 
     <div v-loading="loading">
@@ -62,7 +65,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete, Location } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Location, ArrowLeft } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { Locations } from '@/services/db'
 import type { Location as LocType } from '@/types'

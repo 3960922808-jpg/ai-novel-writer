@@ -5,9 +5,12 @@
         <h1 class="page-title">{{ project.title }}</h1>
         <p class="text-muted text-sm">{{ project.description || '暂无简介' }}</p>
       </div>
-      <el-button type="primary" :icon="Edit" :disabled="!latestChapterId" @click="$router.push({ name: 'editor', params: { chapterId: latestChapterId } })">
-        继续写作
-      </el-button>
+      <div class="flex gap-2">
+        <el-button :icon="ArrowLeft" @click="$router.push('/')">返回书架</el-button>
+        <el-button type="primary" :icon="Edit" :disabled="!latestChapterId" @click="$router.push({ name: 'editor', params: { chapterId: latestChapterId } })">
+          继续写作
+        </el-button>
+      </div>
     </div>
 
     <!-- 数据卡片 -->
@@ -113,7 +116,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { Edit, ArrowRight, Document, Connection, ChatLineSquare, MagicStick, Download } from '@element-plus/icons-vue'
+import { Edit, ArrowRight, Document, Connection, ChatLineSquare, MagicStick, Download, ArrowLeft } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useProjectStore } from '@/stores/project'
 import * as db from '@/services/db'

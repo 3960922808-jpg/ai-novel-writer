@@ -10,6 +10,7 @@
         </div>
       </div>
       <div class="flex gap-2 items-center">
+        <el-button :icon="ArrowLeft" @click="$router.push({ name: 'dashboard' })">返回</el-button>
         <el-dropdown trigger="click" @command="addNode">
           <el-button type="primary" :icon="Plus">
             添加节点
@@ -142,7 +143,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Close, Connection, ArrowDown, DocumentChecked, InfoFilled } from '@element-plus/icons-vue'
+import { Plus, Close, Connection, ArrowDown, DocumentChecked, InfoFilled, ArrowLeft } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import * as db from '@/services/db'
 import type { CanvasNode, ID } from '@/types'

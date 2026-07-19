@@ -9,6 +9,7 @@
         <p class="text-muted text-sm" style="margin: 6px 0 0">输入问题或关键词，直接给出搜索结果</p>
       </div>
       <div class="flex gap-2">
+        <el-button :icon="ArrowLeft" @click="$router.push({ name: 'dashboard' })">返回</el-button>
         <el-tag size="small" effect="plain" :type="providerTagType">
           {{ providerLabel }}
         </el-tag>
@@ -74,7 +75,7 @@
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  Search, Setting, Loading, Link
+  Search, Setting, Loading, Link, ArrowLeft
 } from '@element-plus/icons-vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useProjectStore } from '@/stores/project'
