@@ -70,8 +70,10 @@ const api = {
   updater: {
     // 手动触发一次检查
     check: () => ipcRenderer.invoke('updater:check'),
-    // 下载更新并启动安装
+    // 软件内下载并自动重启（速度慢，作为备选）
     download: () => ipcRenderer.invoke('updater:download'),
+    // 用系统浏览器打开下载链接（推荐：速度快，支持 IDM/迅雷等下载工具）
+    downloadWithBrowser: () => ipcRenderer.invoke('updater:download-browser'),
     // 监听"发现新版本"事件
     onUpdateAvailable: (cb: (info: {
       version: string

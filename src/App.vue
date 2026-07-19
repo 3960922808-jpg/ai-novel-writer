@@ -1,65 +1,65 @@
 <template>
   <router-view />
 
-  <!-- 更新进度对话框：进度条走满后显示"下载完成，正在重启"，不可关闭 -->
+  <!-- 发现新版本对话框：提供"用浏览器下载"按钮，让用户用浏览器/IDM/迅雷下载 -->
   <el-dialog
     v-model="updateDialogVisible"
-    :title="downloadState === 'done' ? '下载完成' : (downloadState === 'error' ? '更新失败' : '正在更新')"
-    width="520px"
-    :close-on-click-modal="false"
-    :close-on-press-escape="false"
-    :show-close="downloadState === 'error'"
+    title="发现新版本"
+    width="540px"
     align-center
   >
     <div class="update-dialog">
-      <!-- 下载进度阶段（含 100% 完成状态） -->
-      <template v-if="downloadState === 'downloading' || downloadState === 'done'">
-        <div class="update-headline">
-          <el-icon class="update-icon is-loading" v-if="downloadPercent < 100"><Loading /></el-icon>
-          <el-icon class="update-icon success" v-else><SuccessFilled /></el-icon>
-          <span v-if="downloadPercent < 100">发现新版本，正在自动更新...</span>
-          <span v-else>下载完成，3 秒后自动重启应用...</span>
-        </div>
-        <div class="update-meta" v-if="updateInfo">
-          <el-tag size="small" type="success">{{ updateInfo.version }}</el-tag>
-          <span class="update-author">{{ updateInfo.name }}</span>
-        </div>
-        <el-progress
-          :percentage="downloadPercent"
-          :status="downloadPercent >= 100 ? 'success' : ''"
-          :stroke-width="10"
-          style="margin: 16px 0"
-        />
-        <div class="update-status text-muted">{{ downloadStatus }}</div>
-        <div class="update-tip" v-if="downloadPercent < 100">
-          更新将自动下载并覆盖旧版本，无需手动操作，请勿关闭应用
-        </div>
-        <div class="update-tip success" v-else>
-          ✅ 下载成功！3 秒后应用将自动重启进入新版本，请勿关闭窗口
-        </div>
-      </template>
+      <div class="update-headline">
+        <el-icon class="update-icon"><UploadFilled /></el-icon>
+        <span>发现新版本 {{ updateInfo?.version }}</span>
+      </div>
+      <div class="update-meta" v-if="updateInfo">
+        <el-tag size="small" type="success">{{ updateInfo.version }}</el-tag>
+        <span class="update-author">{{ updateInfo.name }}</span>
+        <span class="update-size" v-if="updateInfo.downloadSize">
+          · {{ (updateInfo.downloadSize / 1024 / 1024).toFixed(1) }} MB
+        </span>
+      </div>
 
-      <!-- 失败阶段 -->
-      <template v-if="downloadState === 'error'">
-        <div class="update-headline">
-          <el-icon class="update-icon error"><CircleCloseFilled /></el-icon>
-          <span>更新失败</span>
+      <div class="update-tip-block">
+        <div class="update-tip-row">📦 安装包：<code>{{ updateInfo?.downloadName || 'AI-Novel-Writer-Setup.exe' }}</code></div>
+        <div class="update-tip-row">⬇ 大小：{{ updateInfo?.downloadSize ? (updateInfo.downloadSize / 1024 / 1024).toFixed(1) + ' MB' : '未知' }}</div>
+      </div>
+
+      <div class="update-steps">
+        <div class="steps-title">更新步骤：</div>
+        <ol>
+          <li>点击下方"用浏览器下载安装包"按钮</li>
+          <li>浏览器（或 IDM/迅雷等下载工具）会自动开始下载，速度更快</li>
+          <li>下载完成后，双击运行下载的 Setup.exe</li>
+          <li>安装程序会自动覆盖旧版本并启动新版本</li>
+        </ol>
+      </div>
+
+      <div class="update-url-block" v-if="downloadUrl">
+        <div class="url-label">下载链接（可复制到下载工具）：</div>
+        <div class="url-row">
+          <code class="url-text">{{ downloadUrl }}</code>
+          <el-button size="small" :icon="DocumentCopy" @click="copyUrl">复制</el-button>
         </div>
-        <div class="update-message error">{{ downloadStatus }}</div>
-        <div class="update-tip">请检查网络连接后重试，或点击"前往发布页"手动下载安装包覆盖旧版本。</div>
-      </template>
+      </div>
     </div>
 
     <template #footer>
-      <el-button v-if="downloadState === 'error'" @click="openReleasePage">前往发布页</el-button>
-      <el-button v-if="downloadState === 'error'" type="primary" @click="startDownload">重试</el-button>
+      <el-button @click="updateDialogVisible = false">稍后再说</el-button>
+      <el-button @click="openReleasePage">打开发布页</el-button>
+      <el-button type="primary" :loading="opening" @click="downloadWithBrowser">
+        <el-icon style="margin-right: 4px"><Download /></el-icon>
+        用浏览器下载安装包
+      </el-button>
     </template>
   </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { Loading, SuccessFilled, CircleCloseFilled } from '@element-plus/icons-vue'
+import { UploadFilled, Download, DocumentCopy } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { useSettingsStore } from '@/stores/settings'
 
 const settings = useSettingsStore()
@@ -78,12 +78,8 @@ interface UpdateInfo {
 
 const updateDialogVisible = ref(false)
 const updateInfo = ref<UpdateInfo | null>(null)
-
-// 下载状态：发现新版本即自动下载，无需用户确认
-type DownloadState = 'idle' | 'downloading' | 'error' | 'done'
-const downloadState = ref<DownloadState>('idle')
-const downloadPercent = ref(0)
-const downloadStatus = ref('')
+const downloadUrl = ref('')
+const opening = ref(false)
 
 let unsubUpdate: (() => void) | null = null
 let unsubProgress: (() => void) | null = null
@@ -98,31 +94,17 @@ onMounted(async () => {
   try {
     if (window.api?.updater?.onUpdateAvailable) {
       unsubUpdate = window.api.updater.onUpdateAvailable((info: UpdateInfo) => {
-        // 多窗口场景下所有窗口都会收到事件，避免重复触发下载
-        if (downloadState.value === 'downloading' || downloadState.value === 'done') return
+        // 多窗口场景下避免重复弹窗
+        if (updateDialogVisible.value) return
         updateInfo.value = info
-        downloadState.value = 'downloading'
-        downloadPercent.value = 0
-        downloadStatus.value = '正在准备自动下载...'
+        downloadUrl.value = info.downloadUrl || ''
         updateDialogVisible.value = true
-        // 发现新版本 → 立即自动开始下载，不弹"立即更新"确认框
-        startDownload()
       })
     }
+    // 保留 progress 监听以兼容旧逻辑（实际不再使用）
     if (window.api?.updater?.onProgress) {
-      unsubProgress = window.api.updater.onProgress((p: { percent: number; status: string }) => {
-        downloadPercent.value = p.percent < 0 ? 0 : p.percent
-        downloadStatus.value = p.status
-        if (p.percent < 0) {
-          // 下载失败
-          downloadState.value = 'error'
-        } else if (p.percent >= 100) {
-          // 下载完成 → 保持对话框显示"下载完成，正在重启应用..."
-          // 后端会自动启动 NSIS 静默安装并退出应用，新版本会自动启动
-          downloadState.value = 'done'
-        } else {
-          downloadState.value = 'downloading'
-        }
+      unsubProgress = window.api.updater.onProgress(() => {
+        // no-op：已改用浏览器下载，软件内下载进度不再使用
       })
     }
   } catch (e) {
@@ -135,27 +117,37 @@ onUnmounted(() => {
   if (unsubProgress) unsubProgress()
 })
 
-async function startDownload() {
-  downloadState.value = 'downloading'
-  downloadPercent.value = 0
-  downloadStatus.value = '正在准备下载...'
-  updateDialogVisible.value = true
+// 用系统浏览器打开下载链接（推荐方式：速度快，支持 IDM/迅雷等下载工具）
+async function downloadWithBrowser() {
+  opening.value = true
   try {
-    const r = await window.api.updater.download()
-    if (!r.success) {
-      downloadState.value = 'error'
-      downloadStatus.value = r.error || '下载失败'
+    const r: any = await window.api.updater.downloadWithBrowser()
+    if (r?.success) {
+      if (r.downloadUrl) downloadUrl.value = r.downloadUrl
+      ElMessage.success('已打开浏览器开始下载，下载完成后请运行 Setup.exe')
+      // 不关闭对话框，让用户能看到下载链接和步骤说明
+    } else {
+      ElMessage.error('打开浏览器失败：' + (r?.error || '未知错误'))
     }
-    // 成功的话，应用会自动退出并被 NSIS 静默覆盖安装
   } catch (e: any) {
-    downloadState.value = 'error'
-    downloadStatus.value = e?.message || '下载失败'
+    ElMessage.error('打开浏览器失败：' + (e?.message || ''))
+  } finally {
+    opening.value = false
   }
 }
 
 function openReleasePage() {
   const url = updateInfo.value?.url || 'https://github.com/3960922808-jpg/ai-novel-writer/releases'
   window.open(url, '_blank')
+}
+
+async function copyUrl() {
+  try {
+    await navigator.clipboard.writeText(downloadUrl.value)
+    ElMessage.success('下载链接已复制，可粘贴到 IDM/迅雷等下载工具')
+  } catch {
+    ElMessage.warning('复制失败，请手动选择链接复制')
+  }
 }
 </script>
 
@@ -175,59 +167,85 @@ function openReleasePage() {
   color: var(--el-color-primary);
   font-size: 22px;
 }
-.update-icon.error { color: var(--el-color-danger); }
-.update-icon.success { color: var(--el-color-success); }
-.update-icon.is-loading { animation: rotate 1.2s linear infinite; }
-@keyframes rotate { to { transform: rotate(360deg); } }
 .update-meta {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   color: var(--el-text-color-secondary);
-  font-size: 12px;
-  margin-bottom: 14px;
+  font-size: 13px;
+  margin-bottom: 16px;
 }
 .update-author {
   font-weight: 500;
 }
-.update-message {
+.update-size {
+  color: var(--el-text-color-secondary);
+}
+.update-tip-block {
   background: var(--el-fill-color-light);
   padding: 12px 14px;
   border-radius: 6px;
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.8;
   margin-bottom: 14px;
   border-left: 3px solid var(--el-color-primary);
 }
-.update-message.error {
-  border-left-color: var(--el-color-danger);
-  color: var(--el-color-danger);
+.update-tip-row {
+  color: var(--el-text-color-regular);
 }
-.update-tip {
-  color: var(--el-text-color-secondary);
+.update-tip-row code {
+  background: var(--el-fill-color-darker);
+  padding: 1px 6px;
+  border-radius: 3px;
   font-size: 12px;
-  line-height: 1.6;
+  color: var(--el-color-primary);
 }
-.update-tip.success {
-  color: var(--el-color-success);
-  font-weight: 500;
+.update-steps {
+  background: var(--el-fill-color-lighter);
+  padding: 12px 14px 12px 14px;
+  border-radius: 6px;
   font-size: 13px;
+  line-height: 1.7;
+  margin-bottom: 14px;
 }
-.update-notes-full {
+.steps-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--el-text-color-primary);
+}
+.update-steps ol {
+  margin: 0;
+  padding-left: 22px;
+  color: var(--el-text-color-regular);
+}
+.update-steps li {
+  margin-bottom: 2px;
+}
+.update-url-block {
   background: var(--el-fill-color-light);
   padding: 10px 12px;
   border-radius: 6px;
   font-size: 12px;
-  line-height: 1.6;
-  margin-bottom: 12px;
-  max-height: 200px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  color: var(--el-text-color-regular);
 }
-.update-status {
-  font-size: 12px;
-  text-align: center;
-  padding: 4px 0;
+.url-label {
+  color: var(--el-text-color-secondary);
+  margin-bottom: 6px;
+}
+.url-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.url-text {
+  flex: 1;
+  background: var(--el-fill-color-darker);
+  padding: 6px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--el-color-primary);
+  word-break: break-all;
+  display: block;
+  max-height: 60px;
+  overflow-y: auto;
 }
 </style>

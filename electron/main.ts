@@ -8,7 +8,7 @@ import { registerExportIPC } from './ipc/export'
 import { registerFileIPC } from './ipc/files'
 import { registerSearchIPC } from './ipc/search'
 import { initDB } from './lib/db'
-import { startUpdater, checkOnce, downloadAndRestart } from './lib/updater'
+import { startUpdater, checkOnce, downloadAndRestart, openDownloadInBrowser } from './lib/updater'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -133,6 +133,11 @@ app.whenReady().then(async () => {
     // 下载并自动重启
     ipcMain.handle('updater:download', async () => {
       const r = await downloadAndRestart()
+      return r
+    })
+    // 用系统浏览器打开下载链接（速度更快，支持 IDM/迅雷等下载工具）
+    ipcMain.handle('updater:download-browser', async () => {
+      const r = await openDownloadInBrowser()
       return r
     })
     console.log('[main] IPC 已注册')

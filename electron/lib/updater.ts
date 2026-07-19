@@ -473,4 +473,42 @@ export function stopUpdater() {
   }
 }
 
+/**
+ * 用系统浏览器打开下载链接（让用户用浏览器/IDM/迅雷等工具下载，速度远快于软件内 fetch）
+ * 返回下载链接和发布页地址，前端可同时展示给用户
+ */
+export async function openDownloadInBrowser(): Promise<{
+  success: boolean
+  downloadUrl?: string
+  releaseUrl?: string
+  version?: string
+  error?: string
+}> {
+  try {
+    const release = await fetchLatestRelease()
+    if (!release) return { success: false, error: '未找到任何发布版本' }
+    const asset = pickAsset(release.assets)
+    if (!asset || !asset.browser_download_url) {
+      // 没有 exe 资产，直接打开发布页让用户自己挑
+      await shell.openExternal(release.html_url)
+      return {
+        success: true,
+        releaseUrl: release.html_url,
+        version: release.tag_name
+      }
+    }
+    // 用系统默认浏览器打开下载链接
+    await shell.openExternal(asset.browser_download_url)
+    return {
+      success: true,
+      downloadUrl: asset.browser_download_url,
+      releaseUrl: release.html_url,
+      version: release.tag_name
+    }
+  } catch (e: any) {
+    console.error('[updater] 打开浏览器下载失败:', e)
+    return { success: false, error: e?.message || '打开浏览器失败' }
+  }
+}
+
 export { checkOnce }
