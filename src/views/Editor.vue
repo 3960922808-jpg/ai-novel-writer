@@ -290,6 +290,9 @@
             <div v-if="generating" class="chat-msg assistant">
               <div class="chat-msg-role">AI</div>
               <div class="chat-msg-content streaming">{{ aiStreamingText }}<span class="cursor">▌</span></div>
+              <div class="chat-msg-actions">
+                <el-button text size="small" type="danger" :icon="VideoPause" @click="stopGenerate">停止生成</el-button>
+              </div>
             </div>
           </div>
         </div>
@@ -439,7 +442,7 @@ import {
   DocumentCopy, Microphone, Delete, CopyDocument, MagicStick, RefreshLeft,
   RefreshRight, ChatLineRound, List, ChatDotRound, Link, Promotion,
   Star, DArrowLeft, DArrowRight, QuestionFilled, ChatLineSquare,
-  Location as LocationIcon, Reading
+  Location as LocationIcon, Reading, VideoPause
 } from '@element-plus/icons-vue'
 import { useEditor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
@@ -649,6 +652,8 @@ const userInput = ref('')
 const aiStreamingText = ref('')
 const generating = ref(false)
 const stopFlag = ref(false)
+// 当前流式会话的 IPC channel，用于停止时通知主进程 abort fetch
+let currentStreamChan: string | null = null
 const builtinPrompts = ref<Prompt[]>([])
 const projectPrompts = ref<Prompt[]>([])
 const selectedPromptId = ref('')
@@ -1025,8 +1030,11 @@ async function sendChat() {
 }
 
 function stopGenerate() {
+  // 设置 stopFlag 后，streamChat 的 onChunk 回调会立刻 return，不再累加 aiStreamingText
+  // 主进程的 fetch 流会继续（前端无法真正 abort），但 UI 不再更新，效果等同于停止
   stopFlag.value = true
   generating.value = false
+  aiStreamingText.value = ''
 }
 
 // ===== AI 提问解析与回答 =====
@@ -1360,6 +1368,8 @@ function speakChapter() {
     return
   }
   if ('speechSynthesis' in window) {
+    // 取消之前的朗读，避免多次点击叠加多个 utterance 同时播放
+    speechSynthesis.cancel()
     const utter = new SpeechSynthesisUtterance(text)
     utter.lang = 'zh-CN'
     speechSynthesis.speak(utter)
@@ -1416,9 +1426,17 @@ onMounted(async () => {
   }
 })
 
-onBeforeUnmount(() => {
+onBeforeUnmount(async () => {
   // 切换页面前静默保存一次，避免数据丢失
-  save({ silent: true })
+  try {
+    await save({ silent: true })
+  } catch (e: any) {
+    console.error('[Editor] 卸载时保存失败:', e?.message || e)
+  }
+  // 取消朗读，避免切页面后继续播放
+  if ('speechSynthesis' in window) {
+    try { speechSynthesis.cancel() } catch {}
+  }
   editor.value?.destroy()
 })
 

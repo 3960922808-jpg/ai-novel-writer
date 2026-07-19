@@ -44,6 +44,7 @@ const FETCH_TIMEOUT_MS = 8_000 // 8 秒超时
 const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000 // 下载 5 分钟超时
 
 let timer: NodeJS.Timeout | null = null
+let initialTimer: NodeJS.Timeout | null = null
 let lastKnownVersion = ''
 let isChecking = false
 let isDownloading = false
@@ -355,6 +356,7 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
         fileStream.write(chunk)
         chunkIndex++
         if (total > 0) {
+          // 下载部分占 10%-95%，留 5% 给"完成"动画
           const pct = 10 + Math.floor((received / total) * 85)
           if (pct > lastPct || chunkIndex % 50 === 0) {
             lastPct = pct
@@ -370,7 +372,8 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
       reader.on('end', () => {
         if (downloadTimer) clearTimeout(downloadTimer)
         fileStream.end(() => {
-          sendProgress(95, '下载完成，正在校验...')
+          // 直接跳到 100%，明确告诉用户"下载完成"
+          sendProgress(100, '下载完成，3 秒后自动重启应用...')
           resolve()
         })
       })
@@ -393,11 +396,11 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
 
     // 安装包：用 NSIS /S 静默安装，自动覆盖旧文件
     if (/\.exe$/i.test(asset.name)) {
-      // 进度条走满，明确告诉用户下载成功
-      sendProgress(100, '下载完成，正在重启应用...')
+      // 进度条已走满 100%，明确告诉用户下载成功
+      sendProgress(100, '下载完成，3 秒后自动重启应用...')
 
-      // 等 1.2 秒让前端进度条动画走满 100%
-      await new Promise(r => setTimeout(r, 1200))
+      // 等 3 秒让用户看到"下载成功"提示和进度条满格状态
+      await new Promise(r => setTimeout(r, 3000))
 
       // 用 NSIS /S 静默安装 + --force-run 安装后自动启动新版本
       // /S: 静默模式（无界面）
@@ -410,13 +413,8 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
       })
       child.unref()
 
-      // 不立即退出，给 NSIS 一点时间启动
-      // NSIS 静默安装通常会：
-      //   1. 等待旧 exe 释放文件锁（这里通过退出应用来实现）
-      //   2. 替换 exe 文件
-      //   3. 因为 --force-run，启动新版本
-      // 这里给 800ms 让 NSIS 启动，然后退出当前应用释放文件锁
-      await new Promise(r => setTimeout(r, 800))
+      // 给 1 秒让 NSIS 启动并进入"等待文件锁"状态，然后退出当前应用释放锁
+      await new Promise(r => setTimeout(r, 1000))
       app.exit(0)
 
       return { success: true }
@@ -448,7 +446,8 @@ export function startUpdater() {
     lastKnownVersion = s.lastKnownVersion || ''
   } catch {}
 
-  setTimeout(async () => {
+  initialTimer = setTimeout(async () => {
+    initialTimer = null
     const s = getSettings()
     if (s.autoUpdateCheck === false) return
     await checkOnce({ silent: false })
@@ -464,6 +463,10 @@ export function startUpdater() {
 }
 
 export function stopUpdater() {
+  if (initialTimer) {
+    clearTimeout(initialTimer)
+    initialTimer = null
+  }
   if (timer) {
     clearInterval(timer)
     timer = null

@@ -149,13 +149,17 @@ export function registerExportIPC() {
       <body><h1>${data.project.title}</h1>${data.chapters.map(c => `<h2>${c.title}</h2>${c.content}`).join('')}</body></html>`
 
       const pdfWin = new BrowserWindow({ show: false, webPreferences: { offscreen: true } })
-      await pdfWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
-      const pdf = await pdfWin.webContents.printToPDF({ printBackground: false, margins: { top: 0, bottom: 0, left: 0, right: 0 } })
-      pdfWin.destroy()
-      const r = await saveDialog(win, `${data.project.title}.pdf`, 'pdf')
-      if (!r || r.canceled || !r.filePath) return null
-      await fs.writeFile(r.filePath, pdf)
-      return r.filePath
+      try {
+        await pdfWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
+        const pdf = await pdfWin.webContents.printToPDF({ printBackground: false, margins: { top: 0, bottom: 0, left: 0, right: 0 } })
+        const r = await saveDialog(win, `${data.project.title}.pdf`, 'pdf')
+        if (!r || r.canceled || !r.filePath) return null
+        await fs.writeFile(r.filePath, pdf)
+        return r.filePath
+      } finally {
+        // 无论成功失败都销毁，避免隐藏 BrowserWindow 泄漏
+        pdfWin.destroy()
+      }
     } catch (e: any) {
       console.error('PDF 导出失败', e)
       throw new Error('PDF 导出失败：' + e.message)

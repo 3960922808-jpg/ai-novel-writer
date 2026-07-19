@@ -18,7 +18,7 @@
           <el-icon class="update-icon is-loading" v-if="downloadPercent < 100"><Loading /></el-icon>
           <el-icon class="update-icon success" v-else><SuccessFilled /></el-icon>
           <span v-if="downloadPercent < 100">发现新版本，正在自动更新...</span>
-          <span v-else>下载完成，正在重启应用...</span>
+          <span v-else>下载完成，3 秒后自动重启应用...</span>
         </div>
         <div class="update-meta" v-if="updateInfo">
           <el-tag size="small" type="success">{{ updateInfo.version }}</el-tag>
@@ -35,7 +35,7 @@
           更新将自动下载并覆盖旧版本，无需手动操作，请勿关闭应用
         </div>
         <div class="update-tip success" v-else>
-          ✅ 下载成功！应用正在自动重启进入新版本，请稍候...
+          ✅ 下载成功！3 秒后应用将自动重启进入新版本，请勿关闭窗口
         </div>
       </template>
 
@@ -98,6 +98,8 @@ onMounted(async () => {
   try {
     if (window.api?.updater?.onUpdateAvailable) {
       unsubUpdate = window.api.updater.onUpdateAvailable((info: UpdateInfo) => {
+        // 多窗口场景下所有窗口都会收到事件，避免重复触发下载
+        if (downloadState.value === 'downloading' || downloadState.value === 'done') return
         updateInfo.value = info
         downloadState.value = 'downloading'
         downloadPercent.value = 0

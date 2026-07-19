@@ -81,7 +81,7 @@ export function registerAIIPC() {
       return full
     } catch (err: any) {
       if (aborted) return ''
-      event.sender.send(chan, '错误：' + err.message)
+      // 不再把错误信息当作流式 chunk 发给前端，避免被当作正文渲染
       throw err
     } finally {
       ipcMain.removeListener('ai:stream:cancel', cancelHandler)
@@ -117,7 +117,8 @@ export function registerAIIPC() {
       const json = await resp.json()
       return json.choices?.[0]?.message?.content || ''
     } catch (e: any) {
-      throw new Error('AI 请求失败：' + e.message)
+      // 保留原始错误信息，避免前端再包装一次造成"AI 请求失败：AI 请求失败：API 401"
+      throw e
     }
   })
 }

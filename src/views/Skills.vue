@@ -292,8 +292,8 @@ const detectedVars = computed(() => extractVariables(editing.value.userPrompt))
 
 function openCreate() {
   editing.value = emptySkill()
-  // 无项目时强制 global
-  editing.value.projectId = project.value ? 'global' : 'global'
+  // 有项目时绑定到当前项目；无项目（全局入口）时强制 global
+  editing.value.projectId = project.value?.id || 'global'
   tagInput.value = ''
   editVisible.value = true
 }
@@ -383,7 +383,7 @@ async function importFromFolder() {
 
     editing.value = {
       id: '',
-      projectId: project.value?.id ? 'global' : 'global',
+      projectId: project.value?.id || 'global',
       name: data.name || '导入的技能',
       description: data.description || '',
       category: data.category || '导入',
