@@ -1,16 +1,20 @@
 <template>
-  <div class="page" v-if="project">
+  <div class="page" :class="{ 'page-noproject': !project }">
     <div class="page-header">
       <div>
         <h1 class="page-title">
           <el-icon style="vertical-align: -3px; margin-right: 6px"><MagicStick /></el-icon>
-          技能库（Skills）
+          {{ project ? '技能库（Skills）' : '全局技能库' }}
         </h1>
         <p class="text-muted text-sm" style="margin: 6px 0 0">
-          技能在「写作」页的右侧 AI 对话输入框中通过 <code class="slash-code">/</code> 触发调用。这里只用于管理与编辑技能。
+          技能在「写作」页的右侧 AI 对话输入框中通过 <code class="slash-code">/</code> 触发调用。这里用于管理与编辑技能。
+          <span v-if="!project">此页面只显示全局技能，项目专属技能请进入对应项目内管理。</span>
         </p>
       </div>
-      <el-button type="primary" :icon="Plus" @click="openCreate">添加技能</el-button>
+      <div class="flex gap-2">
+        <el-button :icon="FolderOpened" @click="importFromFolder">从文件夹导入</el-button>
+        <el-button type="primary" :icon="Plus" @click="openCreate">添加技能</el-button>
+      </div>
     </div>
 
     <!-- 筛选 -->
@@ -25,7 +29,7 @@
       <el-radio-group v-model="scope" size="small">
         <el-radio-button label="all">全部</el-radio-button>
         <el-radio-button label="global">全局</el-radio-button>
-        <el-radio-button label="project">本项目</el-radio-button>
+        <el-radio-button v-if="project" label="project">本项目</el-radio-button>
         <el-radio-button label="builtin">内置</el-radio-button>
       </el-radio-group>
       <span class="text-faint text-xs count-tip">共 {{ filtered.length }} / {{ skills.length }} 个</span>
@@ -150,7 +154,7 @@
         <el-form-item label="作用域">
           <el-radio-group v-model="editing.projectId">
             <el-radio label="global">全局（所有项目可用）</el-radio>
-            <el-radio :label="project.id">仅当前项目</el-radio>
+            <el-radio v-if="project" :label="project.id">仅当前项目</el-radio>
           </el-radio-group>
         </el-form-item>
       </el-form>
@@ -170,7 +174,7 @@ import {
   Aim, ChatLineSquare, DataAnalysis,
   CopyDocument as CopyDoc, EditPen, Setting, Collection, Timer,
   Connection, Trophy, Files, Download, Search as SearchIcon,
-  Sunny, Moon, Star, Brush, Pointer, Lightning
+  Sunny, Moon, Star, Brush, Pointer, Lightning, FolderOpened
 } from '@element-plus/icons-vue'
 import type { Skill } from '@/types'
 import { useProjectStore } from '@/stores/project'
@@ -244,10 +248,12 @@ const filtered = computed(() => {
 onMounted(load)
 
 async function load() {
-  if (!project.value) return
   loading.value = true
   try {
-    skills.value = await SkillsDB.list(project.value.id)
+    // 全局模式（书架页入口）：传 'global' 只加载全局技能
+    // 项目模式：传项目 ID，加载全局 + 本项目技能
+    const pid = project.value?.id || 'global'
+    skills.value = await SkillsDB.list(pid)
   } catch (e: any) {
     ElMessage.error('加载技能失败：' + (e?.message || ''))
   } finally {
@@ -286,7 +292,8 @@ const detectedVars = computed(() => extractVariables(editing.value.userPrompt))
 
 function openCreate() {
   editing.value = emptySkill()
-  if (project.value) editing.value.projectId = 'global'
+  // 无项目时强制 global
+  editing.value.projectId = project.value ? 'global' : 'global'
   tagInput.value = ''
   editVisible.value = true
 }
@@ -350,6 +357,54 @@ async function duplicate(s: Skill) {
   const saved = await SkillsDB.save(copy)
   skills.value.push(saved)
   ElMessage.success('已复制')
+}
+
+// ===== 从本地文件夹导入 skill =====
+// 支持的文件夹结构：
+//   1) skill/SKILL.md（YAML frontmatter + body）
+//   2) skill/prompt.md + skill/system.md
+//   3) skill/config.json + skill/prompt.md
+//   4) 任意 .md 文件
+async function importFromFolder() {
+  try {
+    const folderPath = await window.api.file.selectFolder()
+    if (!folderPath) return
+
+    const data = await window.api.file.readSkillFolder(folderPath)
+    if (!data) {
+      ElMessage.warning('未能从该文件夹解析出 skill 内容')
+      return
+    }
+
+    // 优先使用文件夹里的 systemPrompt；若 SKILL.md 的 frontmatter 没单独给出 systemPrompt，
+    // 也允许把 body 拆分：前半部分作为 systemPrompt，后半部分作为 userPrompt（保持简单，不做拆分）
+    const sys = (data.systemPrompt || '').trim()
+    const usr = (data.userPrompt || data.systemPrompt || '').trim()
+
+    editing.value = {
+      id: '',
+      projectId: project.value?.id ? 'global' : 'global',
+      name: data.name || '导入的技能',
+      description: data.description || '',
+      category: data.category || '导入',
+      icon: 'MagicStick',
+      systemPrompt: sys,
+      userPrompt: usr,
+      variables: extractVariables(usr),
+      recommendedModel: '',
+      temperature: typeof data.temperature === 'number' ? data.temperature : 0.8,
+      maxTokens: typeof data.maxTokens === 'number' ? data.maxTokens : 2048,
+      tags: Array.isArray(data.tags) ? data.tags.slice(0, 20) : [],
+      isBuiltIn: false,
+      createdAt: 0,
+      updatedAt: 0
+    }
+    tagInput.value = ''
+    editVisible.value = true
+    ElMessage.success(`已从文件夹导入：${editing.value.name}（请检查后保存）`)
+  } catch (e: any) {
+    ElMessage.error('导入失败：' + (e?.message || ''))
+  }
 }
 
 function iconBg(s: Skill) {

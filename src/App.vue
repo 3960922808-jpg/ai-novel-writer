@@ -1,10 +1,10 @@
 <template>
   <router-view />
 
-  <!-- 更新进度对话框：只在下载/失败/完成时显示，不再让用户确认 -->
+  <!-- 更新进度对话框：进度条走满后显示"下载完成，正在重启"，不可关闭 -->
   <el-dialog
     v-model="updateDialogVisible"
-    :title="downloadState === 'done' ? '更新完成' : (downloadState === 'error' ? '更新失败' : '正在更新')"
+    :title="downloadState === 'done' ? '下载完成' : (downloadState === 'error' ? '更新失败' : '正在更新')"
     width="520px"
     :close-on-click-modal="false"
     :close-on-press-escape="false"
@@ -12,12 +12,13 @@
     align-center
   >
     <div class="update-dialog">
-      <!-- 下载进度阶段 -->
-      <template v-if="downloadState === 'downloading'">
+      <!-- 下载进度阶段（含 100% 完成状态） -->
+      <template v-if="downloadState === 'downloading' || downloadState === 'done'">
         <div class="update-headline">
           <el-icon class="update-icon is-loading" v-if="downloadPercent < 100"><Loading /></el-icon>
-          <el-icon class="update-icon" v-else><SuccessFilled /></el-icon>
-          <span>{{ downloadPercent >= 100 ? '下载完成，正在静默安装并重启...' : '发现新版本，正在自动更新...' }}</span>
+          <el-icon class="update-icon success" v-else><SuccessFilled /></el-icon>
+          <span v-if="downloadPercent < 100">发现新版本，正在自动更新...</span>
+          <span v-else>下载完成，正在重启应用...</span>
         </div>
         <div class="update-meta" v-if="updateInfo">
           <el-tag size="small" type="success">{{ updateInfo.version }}</el-tag>
@@ -30,7 +31,12 @@
           style="margin: 16px 0"
         />
         <div class="update-status text-muted">{{ downloadStatus }}</div>
-        <div class="update-tip">更新将自动下载并覆盖旧版本，无需手动操作，请勿关闭应用</div>
+        <div class="update-tip" v-if="downloadPercent < 100">
+          更新将自动下载并覆盖旧版本，无需手动操作，请勿关闭应用
+        </div>
+        <div class="update-tip success" v-else>
+          ✅ 下载成功！应用正在自动重启进入新版本，请稍候...
+        </div>
       </template>
 
       <!-- 失败阶段 -->
@@ -106,8 +112,11 @@ onMounted(async () => {
         downloadPercent.value = p.percent < 0 ? 0 : p.percent
         downloadStatus.value = p.status
         if (p.percent < 0) {
+          // 下载失败
           downloadState.value = 'error'
         } else if (p.percent >= 100) {
+          // 下载完成 → 保持对话框显示"下载完成，正在重启应用..."
+          // 后端会自动启动 NSIS 静默安装并退出应用，新版本会自动启动
           downloadState.value = 'done'
         } else {
           downloadState.value = 'downloading'
@@ -165,6 +174,7 @@ function openReleasePage() {
   font-size: 22px;
 }
 .update-icon.error { color: var(--el-color-danger); }
+.update-icon.success { color: var(--el-color-success); }
 .update-icon.is-loading { animation: rotate 1.2s linear infinite; }
 @keyframes rotate { to { transform: rotate(360deg); } }
 .update-meta {
@@ -195,6 +205,11 @@ function openReleasePage() {
   color: var(--el-text-color-secondary);
   font-size: 12px;
   line-height: 1.6;
+}
+.update-tip.success {
+  color: var(--el-color-success);
+  font-weight: 500;
+  font-size: 13px;
 }
 .update-notes-full {
   background: var(--el-fill-color-light);

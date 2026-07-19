@@ -14,6 +14,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '设置' }
   },
   {
+    path: '/skills',
+    name: 'global-skills',
+    component: () => import('@/views/Skills.vue'),
+    meta: { title: '全局技能库' }
+  },
+  {
     path: '/project/:id',
     component: () => import('@/views/ProjectLayout.vue'),
     children: [

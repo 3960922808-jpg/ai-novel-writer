@@ -54,7 +54,11 @@ const api = {
     selectImage: () => ipcRenderer.invoke('file:select-image'),
     readImageBase64: (filePath: string) => ipcRenderer.invoke('file:read-image', filePath),
     selectNovel: () => ipcRenderer.invoke('file:select-novel'),
-    readNovelText: (filePath: string) => ipcRenderer.invoke('file:read-novel', filePath)
+    readNovelText: (filePath: string) => ipcRenderer.invoke('file:read-novel', filePath),
+    // 选择文件夹（用于 skill 导入等场景）
+    selectFolder: () => ipcRenderer.invoke('file:select-folder'),
+    // 读取 skill 文件夹，返回结构化数据
+    readSkillFolder: (folderPath: string) => ipcRenderer.invoke('file:read-skill-folder', folderPath)
   },
 
   // ====== 联网搜索 ======

@@ -393,33 +393,31 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
 
     // 安装包：用 NSIS /S 静默安装，自动覆盖旧文件
     if (/\.exe$/i.test(asset.name)) {
-      sendProgress(98, '下载完成，正在静默安装更新...')
+      // 进度条走满，明确告诉用户下载成功
+      sendProgress(100, '下载完成，正在重启应用...')
 
-      // 等待 600ms 让前端显示进度
-      await new Promise(r => setTimeout(r, 600))
+      // 等 1.2 秒让前端进度条动画走满 100%
+      await new Promise(r => setTimeout(r, 1200))
 
-      sendProgress(100, '更新已安装，应用将自动重启')
-
-      // 等待 500ms 让前端看到 100%
-      await new Promise(r => setTimeout(r, 500))
-
-      // 用 NSIS /S 静默安装（无界面，自动覆盖旧文件）
-      // detached 启动，子进程独立于父进程，父进程退出后仍能运行
-      // 安装完成后 NSIS 会替换 C:\Users\xxx\AppData\Local\AI写小说\ 下的文件
-      const child = spawn(savePath, ['/S'], {
+      // 用 NSIS /S 静默安装 + --force-run 安装后自动启动新版本
+      // /S: 静默模式（无界面）
+      // --force-run: 安装完成后强制运行新版本（electron-builder NSIS 支持）
+      // detached + windowsHide: 子进程独立于父进程，隐藏控制台窗口
+      const child = spawn(savePath, ['/S', '--force-run'], {
         detached: true,
         stdio: 'ignore',
         windowsHide: true
       })
       child.unref()
 
-      // 退出当前应用，让 NSIS 可以替换正在运行的 exe
-      // NSIS 安装完成后不会自动重启应用，但安装包配置了 createDesktopShortcut
-      // 用户从桌面快捷方式重新打开即可
-      // 这里给 NSIS 1.5 秒时间启动，然后退出
-      setTimeout(() => {
-        app.exit(0)
-      }, 1500)
+      // 不立即退出，给 NSIS 一点时间启动
+      // NSIS 静默安装通常会：
+      //   1. 等待旧 exe 释放文件锁（这里通过退出应用来实现）
+      //   2. 替换 exe 文件
+      //   3. 因为 --force-run，启动新版本
+      // 这里给 800ms 让 NSIS 启动，然后退出当前应用释放文件锁
+      await new Promise(r => setTimeout(r, 800))
+      app.exit(0)
 
       return { success: true }
     }

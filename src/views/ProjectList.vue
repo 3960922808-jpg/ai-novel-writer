@@ -7,6 +7,7 @@
       </div>
       <div class="flex gap-2">
         <el-button :icon="themeIcon" circle @click="toggleTheme" :title="themeTip" />
+        <el-button :icon="MagicStick" @click="$router.push('/skills')">技能库</el-button>
         <el-button :icon="Setting" @click="$router.push('/settings')">设置</el-button>
         <el-button type="primary" :icon="Plus" @click="openCreate">新建小说</el-button>
       </div>
@@ -142,7 +143,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Setting, MoreFilled, EditPen, Search, CircleClose, Sunny, Moon, Monitor } from '@element-plus/icons-vue'
+import { Plus, Setting, MoreFilled, EditPen, Search, CircleClose, Sunny, Moon, Monitor, MagicStick } from '@element-plus/icons-vue'
 import type { Project } from '@/types'
 import * as db from '@/services/db'
 import { useSettingsStore } from '@/stores/settings'
