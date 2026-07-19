@@ -6,6 +6,7 @@
         <p class="text-muted">基于 OpenWrite 理念的 AI 长篇小说创作工作台</p>
       </div>
       <div class="flex gap-2">
+        <el-button :icon="themeIcon" circle @click="toggleTheme" :title="themeTip" />
         <el-button :icon="Setting" @click="$router.push('/settings')">设置</el-button>
         <el-button type="primary" :icon="Plus" @click="openCreate">新建小说</el-button>
       </div>
@@ -141,13 +142,32 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Setting, MoreFilled, EditPen, Search, CircleClose } from '@element-plus/icons-vue'
+import { Plus, Setting, MoreFilled, EditPen, Search, CircleClose, Sunny, Moon, Monitor } from '@element-plus/icons-vue'
 import type { Project } from '@/types'
 import * as db from '@/services/db'
+import { useSettingsStore } from '@/stores/settings'
 
 const router = useRouter()
 const projects = ref<Project[]>([])
 const loading = ref(false)
+
+// 主题快捷切换
+const settingsStore = useSettingsStore()
+const themeIcon = computed(() => {
+  const mode = settingsStore.settings?.themeMode || 'light'
+  if (mode === 'auto') return Monitor
+  return mode === 'dark' ? Moon : Sunny
+})
+const themeTip = computed(() => {
+  const mode = settingsStore.settings?.themeMode || 'light'
+  return mode === 'auto' ? '跟随系统（点击切换）' : mode === 'dark' ? '深色模式（点击切换）' : '浅色模式（点击切换）'
+})
+function toggleTheme() {
+  const mode = settingsStore.settings?.themeMode || 'light'
+  const next = mode === 'light' ? 'dark' : mode === 'dark' ? 'auto' : 'light'
+  settingsStore.update({ themeMode: next })
+  ElMessage.success(next === 'auto' ? '已切换：跟随系统' : next === 'dark' ? '已切换：深色模式' : '已切换：浅色模式')
+}
 
 // 搜索与筛选
 const keyword = ref('')

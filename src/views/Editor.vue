@@ -19,6 +19,16 @@
       </div>
 
       <div class="topbar-center">
+        <button class="tb-fn-btn" :class="{ 'tb-fn-active': askMode === 'auto' }" @click="setAskMode('auto')" title="AI 仅在卡壳时提问">
+          <el-icon><ChatLineSquare /></el-icon><span>智能提问</span>
+        </button>
+        <button class="tb-fn-btn" :class="{ 'tb-fn-active': askMode === 'always' }" @click="setAskMode('always')" title="每段都让 AI 提问">
+          <el-icon><QuestionFilled /></el-icon><span>每段提问</span>
+        </button>
+        <button class="tb-fn-btn" :class="{ 'tb-fn-active': askMode === 'never' }" @click="setAskMode('never')" title="从不提问，直接续写">
+          <el-icon><Promotion /></el-icon><span>不提问</span>
+        </button>
+        <span class="tb-sep"></span>
         <button class="tb-fn-btn" @click="runTopAction('teardown')">
           <el-icon><Document /></el-icon><span>AI拆书</span>
         </button>
@@ -239,10 +249,32 @@
               :class="msg.role"
             >
               <div class="chat-msg-role">{{ msg.role === 'user' ? '我' : 'AI' }}</div>
-              <div class="chat-msg-content">{{ msg.content }}</div>
-              <div class="chat-msg-actions" v-if="msg.role === 'assistant' && msg.content">
+              <!-- AI 提问卡片（ABCD 选项） -->
+              <div v-if="msg.role === 'assistant' && msg.options && msg.options.length" class="chat-options-card">
+                <div class="chat-msg-content">{{ msg.content }}</div>
+                <div class="options-list">
+                  <button
+                    v-for="(opt, oi) in msg.options"
+                    :key="oi"
+                    class="option-btn"
+                    :class="{ selected: msg.selectedOption === oi, custom: opt.isCustom }"
+                    @click="answerQuestion(msg, oi)"
+                  >
+                    <span class="option-letter">{{ String.fromCharCode(65 + oi) }}</span>
+                    <span class="option-text">{{ opt.text }}</span>
+                  </button>
+                </div>
+                <div v-if="msg.selectedOption !== undefined" class="option-selected-hint">
+                  已选择 {{ String.fromCharCode(65 + msg.selectedOption) }}，继续生成中...
+                </div>
+              </div>
+              <!-- 普通消息 -->
+              <div v-else class="chat-msg-content" v-html="renderMessage(msg.content)"></div>
+              <div class="chat-msg-actions" v-if="msg.role === 'assistant' && msg.content && !msg.options">
                 <el-button text size="small" :icon="DocumentCopy" @click="copyText(msg.content)">复制</el-button>
                 <el-button text size="small" :icon="Plus" @click="appendOutput(msg.content)">追加到正文</el-button>
+                <!-- 卡壳时主动让 AI 提问 -->
+                <el-button text size="small" :icon="QuestionFilled" @click="askAiToQuestion(msg)">让 AI 提问</el-button>
               </div>
             </div>
             <div v-if="generating" class="chat-msg assistant">
@@ -289,7 +321,7 @@
             ref="inputRef"
             v-model="userInput"
             class="chat-input"
-            placeholder="请输入指令，使用 @ 可以快速关联内容，使用 / 可以触发技能"
+            placeholder="请输入指令，输入 @ 关联角色/地点/设定/章节，输入 / 触发技能"
             rows="4"
             @input="onInput"
             @keydown="onKeydown"
@@ -316,6 +348,31 @@
               </button>
               <div v-if="filteredSkills.length === 0" class="slash-empty text-faint text-xs">
                 没有匹配的技能
+              </div>
+            </div>
+          </div>
+
+          <!-- @ 关联弹出菜单 -->
+          <div v-if="atMenuVisible" class="slash-menu at-menu">
+            <div class="slash-menu-header">
+              <span>关联内容（@）</span>
+              <span class="text-faint text-xs">{{ atMatches.length }} 项</span>
+            </div>
+            <div class="slash-menu-list">
+              <button
+                v-for="(m, i) in atMatches"
+                :key="i"
+                class="slash-menu-item"
+                @click="pickAtMatch(m)"
+              >
+                <el-icon class="slash-icon"><component :is="m.icon" /></el-icon>
+                <div class="slash-item-body">
+                  <div class="slash-item-name">{{ m.label }} <span class="text-faint text-xs">[{{ m.type }}]</span></div>
+                  <div class="slash-item-desc text-faint text-xs">{{ m.preview }}</div>
+                </div>
+              </button>
+              <div v-if="atMatches.length === 0" class="slash-empty text-faint text-xs">
+                没有匹配项
               </div>
             </div>
           </div>
@@ -371,7 +428,8 @@ import {
   User, Files, DataAnalysis, Connection, Upload, Download, Loading,
   DocumentCopy, Microphone, Delete, CopyDocument, MagicStick, RefreshLeft,
   RefreshRight, ChatLineRound, List, ChatDotRound, Link, Promotion,
-  Star, DArrowLeft, DArrowRight
+  Star, DArrowLeft, DArrowRight, QuestionFilled, ChatLineSquare,
+  Location as LocationIcon, Reading
 } from '@element-plus/icons-vue'
 import { useEditor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
@@ -567,7 +625,14 @@ function buildContext(): string {
 }
 
 // ===== AI 对话面板 =====
-const chatMessages = ref<Array<{ role: 'user' | 'assistant'; content: string }>>([])
+interface EditorChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+  options?: Array<{ text: string; isCustom?: boolean }>
+  selectedOption?: number
+  isQuestion?: boolean
+}
+const chatMessages = ref<EditorChatMessage[]>([])
 const userInput = ref('')
 const aiStreamingText = ref('')
 const generating = ref(false)
@@ -576,6 +641,25 @@ const builtinPrompts = ref<Prompt[]>([])
 const projectPrompts = ref<Prompt[]>([])
 const selectedPromptId = ref('')
 const skills = ref<Skill[]>([])
+
+// 提问模式：auto=卡壳时问 / always=每次都问 / never=从不问
+const askMode = ref<'auto' | 'always' | 'never'>(
+  settings.settings?.askMode || 'auto'
+)
+
+function setAskMode(mode: 'auto' | 'always' | 'never') {
+  askMode.value = mode
+  // 持久化到全局设置
+  try {
+    settings.update({ askMode: mode })
+  } catch (e) {
+    console.warn('[Editor] 保存 askMode 失败:', e)
+  }
+  const tip = mode === 'auto' ? '智能提问：AI 仅在卡壳时提问' :
+              mode === 'always' ? '每段提问：每段都让 AI 提问' :
+              '不提问：AI 直接续写'
+  ElMessage.success(tip)
+}
 
 // 关联片段
 const linkedItems = ref<Array<{ label: string; content: string }>>([])
@@ -623,6 +707,17 @@ function exportCurrent() {
 const slashMenuVisible = ref(false)
 const slashKeyword = ref('')
 
+// @ 关联菜单
+interface AtMatch {
+  type: string       // 角色/地点/设定/章节
+  label: string      // 显示名
+  preview: string    // 描述前 60 字
+  content: string    // 完整内容（关联时塞入）
+  icon: any          // Element Plus 图标
+}
+const atMenuVisible = ref(false)
+const atMatches = ref<AtMatch[]>([])
+
 const filteredSkills = computed(() => {
   if (!slashKeyword.value) return skills.value
   const kw = slashKeyword.value.toLowerCase()
@@ -633,9 +728,98 @@ const filteredSkills = computed(() => {
   )
 })
 
+/**
+ * 解析输入框中的 @ 关键词，匹配项目内角色/地点/设定/章节
+ * 触发条件：光标前最近一个 @ 后没有空格，且 @ 后字符长度 > 0
+ */
+function detectAtKeyword(text: string, caret: number): string {
+  // 从光标向前找 @
+  const before = text.slice(0, caret)
+  const atIdx = before.lastIndexOf('@')
+  if (atIdx < 0) return ''
+  // @ 必须紧跟非空格内容
+  const after = before.slice(atIdx + 1)
+  if (after.includes(' ') || after.includes('\n')) return ''
+  return after
+}
+
+/** 收集所有可关联项，按关键词过滤 */
+function buildAtMatches(keyword: string): AtMatch[] {
+  if (!project.value) return []
+  const kw = keyword.toLowerCase()
+  const matches: AtMatch[] = []
+  const filter = (s: string) => !kw || s.toLowerCase().includes(kw)
+
+  // 角色
+  for (const c of projectStore.characters) {
+    if (!filter(c.name)) continue
+    matches.push({
+      type: '角色',
+      label: c.name,
+      preview: `${c.role} · ${(c.personality || '无描述').slice(0, 50)}`,
+      content: `【角色：${c.name}】\n身份：${c.role}\n性别：${c.gender || '未设定'}\n年龄：${c.age || '未设定'}\n外貌：${c.appearance || '无'}\n性格：${c.personality || '无'}\n背景：${c.background || '无'}\n能力：${c.abilities || '无'}\n目标：${c.goals || '无'}\n弧线：${c.arc || '无'}`,
+      icon: User
+    })
+  }
+  // 地点
+  for (const l of projectStore.locations) {
+    if (!filter(l.name)) continue
+    matches.push({
+      type: '地点',
+      label: l.name,
+      preview: `${l.type} · ${(l.description || '无描述').slice(0, 50)}`,
+      content: `【地点：${l.name}】\n类型：${l.type}\n描述：${l.description || '无'}\n特征：${l.features || '无'}\n文化：${l.culture || '无'}`,
+      icon: LocationIcon
+    })
+  }
+  // 设定
+  for (const l of projectStore.lore) {
+    if (!filter(l.title)) continue
+    matches.push({
+      type: '设定',
+      label: l.title,
+      preview: `${l.category} · ${(l.content || '无内容').slice(0, 50)}`,
+      content: `【设定：${l.title}】\n分类：${l.category}\n内容：${l.content || '无'}`,
+      icon: Collection
+    })
+  }
+  // 章节
+  for (const c of projectStore.chapters) {
+    if (!filter(c.title)) continue
+    matches.push({
+      type: '章节',
+      label: `第${c.order}章 ${c.title}`,
+      preview: `${c.status} · ${(c.summary || c.content || '').replace(/<[^>]+>/g, '').slice(0, 50)}`,
+      content: `【第${c.order}章《${c.title}》】\n${(c.content || '').replace(/<[^>]+>/g, '\n').slice(0, 3000)}`,
+      icon: Document
+    })
+  }
+  return matches.slice(0, 20)
+}
+
+function pickAtMatch(m: AtMatch) {
+  if (!inputRef.value) return
+  // 把输入框中的 "@xxx" 替换为 "@label "，并把内容塞进 linkedItems
+  const text = userInput.value
+  const caret = inputRef.value.selectionStart ?? text.length
+  const before = text.slice(0, caret)
+  const atIdx = before.lastIndexOf('@')
+  if (atIdx < 0) return
+  const after = text.slice(caret)
+  const newText = before.slice(0, atIdx) + `@${m.label} ` + after
+  userInput.value = newText
+  // 塞入关联内容
+  linkedItems.value.push({ label: m.label, content: m.content })
+  atMenuVisible.value = false
+  ElMessage.success(`已关联${m.type}：${m.label}`)
+  nextTick(() => inputRef.value?.focus())
+}
+
 function onInput(e: Event) {
-  const v = (e.target as HTMLTextAreaElement).value
-  // 检测 / 触发
+  const ta = e.target as HTMLTextAreaElement
+  const v = ta.value
+  const caret = ta.selectionStart ?? v.length
+  // 检测 / 触发（仅在行首或开头）
   if (v.startsWith('/')) {
     slashMenuVisible.value = true
     slashKeyword.value = v.slice(1)
@@ -643,11 +827,31 @@ function onInput(e: Event) {
     slashMenuVisible.value = false
     slashKeyword.value = ''
   }
+  // 检测 @ 触发
+  const atKw = detectAtKeyword(v, caret)
+  if (atKw !== null && atKw.length >= 0 && v.includes('@')) {
+    // @ 后允许 0 个字符也可弹菜单
+    atMenuVisible.value = true
+    atMatches.value = buildAtMatches(atKw)
+  } else {
+    atMenuVisible.value = false
+  }
 }
 
 function onKeydown(e: KeyboardEvent) {
+  // @ 菜单打开时，Enter 选择第一个匹配项
+  if (atMenuVisible.value && atMatches.value.length > 0) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      pickAtMatch(atMatches.value[0])
+      return
+    } else if (e.key === 'Escape') {
+      atMenuVisible.value = false
+      return
+    }
+  }
   // Enter 发送，Shift+Enter 换行
-  if (e.key === 'Enter' && !e.shiftKey && !slashMenuVisible.value) {
+  if (e.key === 'Enter' && !e.shiftKey && !slashMenuVisible.value && !atMenuVisible.value) {
     e.preventDefault()
     sendChat()
   } else if (e.key === 'Escape' && slashMenuVisible.value) {
@@ -700,7 +904,16 @@ async function sendChat() {
   slashMenuVisible.value = false
 
   // 构造 system + user
-  let sysContent = `你是一位资深小说家，擅长${project.value.genre}类型创作。请直接输出正文内容，不要写"以下是续写"等说明性文字，不要使用 markdown 代码块。文风自然流畅，避免AI味。${project.value.settings.styleSample ? '\n参考文风：' + project.value.settings.styleSample : ''}`
+  // 根据 askMode 调整 system prompt：
+  //   auto: 仅在卡壳/不确定时提问，正常情况直接续写
+  //   always: 每次都给出 ABCD 选项让用户选
+  //   never: 从不提问，直接续写
+  const askModePrompt = askMode.value === 'always'
+    ? '\n\n【交互规则】在生成内容前，先以如下格式给出 3 个候选方向让用户选择：\n===QUESTION===\n问题：xxx\nA. 选项一\nB. 选项二\nC. 选项三\nD. 自定义\n===END===\n用户选择后再继续生成。'
+    : askMode.value === 'auto'
+      ? '\n\n【交互规则】只在以下情况向用户提问：1) 剧情走向有多种可能且无法判断用户偏好 2) 角色动机/设定存在矛盾 3) 用户提供的信息不足。提问时使用 ===QUESTION=== ... ===END=== 格式给出 ABCD 三个选项加 D 自定义。能够确定方向时直接续写，不要每段都问。'
+      : '\n\n【交互规则】直接续写，不要提问。'
+  let sysContent = `你是一位资深小说家，擅长${project.value.genre}类型创作。请直接输出正文内容，不要写"以下是续写"等说明性文字，不要使用 markdown 代码块。文风自然流畅，避免AI味。${project.value.settings.styleSample ? '\n参考文风：' + project.value.settings.styleSample : ''}${askModePrompt}`
   let userContent = userMsg
 
   // 自动填充变量的辅助函数
@@ -777,7 +990,19 @@ async function sendChat() {
       }
     )
     if (full) {
-      chatMessages.value.push({ role: 'assistant', content: full })
+      // 解析 AI 输出是否包含 ===QUESTION===...===END=== 提问块
+      const parsed = parseQuestionBlock(full)
+      if (parsed) {
+        // AI 提问了，把消息改为带 options 的提问卡片
+        chatMessages.value.push({
+          role: 'assistant',
+          content: parsed.question,
+          options: parsed.options,
+          isQuestion: true
+        })
+      } else {
+        chatMessages.value.push({ role: 'assistant', content: full })
+      }
     }
   } catch (e: any) {
     ElMessage.error('AI 调用失败：' + e.message)
@@ -790,6 +1015,221 @@ async function sendChat() {
 function stopGenerate() {
   stopFlag.value = true
   generating.value = false
+}
+
+// ===== AI 提问解析与回答 =====
+
+/**
+ * 解析 AI 输出中的提问块：
+ *   ===QUESTION===
+ *   问题：xxx
+ *   A. 选项一
+ *   B. 选项二
+ *   C. 选项三
+ *   D. 自定义
+ *   ===END===
+ * 返回 { question, options } 或 null
+ */
+function parseQuestionBlock(text: string): { question: string; options: Array<{ text: string; isCustom?: boolean }> } | null {
+  const m = text.match(/=+\s*QUESTION\s*=+([\s\S]*?)=+\s*END\s*=+/i)
+  if (!m) return null
+  const block = m[1].trim()
+  const lines = block.split('\n').map(l => l.trim()).filter(Boolean)
+  // 第一行通常是"问题：xxx"，但也可能直接是问题
+  let question = ''
+  const options: Array<{ text: string; isCustom?: boolean }> = []
+  for (const line of lines) {
+    const qm = line.match(/^问[题题]?\s*[:：]\s*(.+)$/)
+    if (qm && !question) {
+      question = qm[1].trim()
+      continue
+    }
+    const om = line.match(/^([A-D])[\.、:：]\s*(.+)$/)
+    if (om) {
+      const letter = om[1]
+      const content = om[2].trim()
+      options.push({
+        text: content,
+        isCustom: /自定义|其他|自己|custom/i.test(content) && letter === 'D'
+      })
+    } else if (!question && !options.length) {
+      // 既不是问题行也不是选项行，作为问题的一部分
+      question = line
+    }
+  }
+  if (!question && options.length === 0) return null
+  // 如果没解析到选项，但整个块就一行，那把它当问题，无选项
+  if (options.length === 0) return null
+  return { question, options }
+}
+
+/**
+ * 用户点击选项后：把选择作为新一轮 user 消息发回 AI，让它继续生成
+ */
+async function answerQuestion(msg: EditorChatMessage, idx: number) {
+  if (msg.selectedOption !== undefined) return  // 已选择过
+  msg.selectedOption = idx
+  const opt = msg.options?.[idx]
+  if (!opt) return
+  const answer = opt.isCustom
+    ? `我选 D（自定义），请让我自己输入：`
+    : `我选 ${String.fromCharCode(65 + idx)}：${opt.text}\n请按这个方向继续创作。`
+  // 自定义选项弹输入框
+  if (opt.isCustom) {
+    const custom = window.prompt('请输入你的自定义答案：', '')
+    if (custom === null) {
+      // 用户取消，撤销选择
+      msg.selectedOption = undefined
+      return
+    }
+    msg.options![idx].text = `自定义：${custom}`
+    chatMessages.value.push({ role: 'user', content: `我选 D（自定义）：${custom}\n请按这个方向继续创作。` })
+  } else {
+    chatMessages.value.push({ role: 'user', content: answer })
+  }
+  // 触发续写
+  await continueAfterAnswer()
+}
+
+/**
+ * AI 提问被回答后，自动续写（不显示用户输入框内容，直接用最后一条 user 消息）
+ */
+async function continueAfterAnswer() {
+  if (!project.value) return
+  const provider = getProvider()
+  if (!provider?.apiKey) {
+    ElMessage.warning('请先在设置中配置 API Key')
+    return
+  }
+  const askModePrompt = askMode.value === 'always'
+    ? '\n\n【交互规则】继续按 ===QUESTION=== ... ===END=== 格式，每生成一段都给出 ABCD 选项让用户选择。'
+    : askMode.value === 'auto'
+      ? '\n\n【交互规则】只在卡壳时提问，正常情况直接续写。'
+      : '\n\n【交互规则】直接续写，不要提问。'
+  const sysContent = `你是一位资深小说家，擅长${project.value.genre}类型创作。文风自然流畅，避免AI味。${project.value.settings.styleSample ? '\n参考文风：' + project.value.settings.styleSample : ''}${askModePrompt}`
+  const ctx = buildContext()
+  const recent = chatMessages.value
+    .filter(m => !m.isQuestion || m.selectedOption !== undefined)
+    .slice(-6)
+    .map(m => {
+      if (m.isQuestion && m.selectedOption !== undefined && m.options) {
+        const opt = m.options[m.selectedOption]
+        return { role: 'assistant' as const, content: `[提问]${m.content}\n[用户选择]${String.fromCharCode(65 + m.selectedOption)}. ${opt.text}` }
+      }
+      return { role: m.role as 'user' | 'assistant', content: m.content }
+    })
+  // 取最后一条 user 消息
+  const lastUser = chatMessages.value.filter(m => m.role === 'user').slice(-1)[0]
+  if (!lastUser) return
+  const userContent = `${lastUser.content}\n\n【当前上下文】\n${ctx}`
+
+  generating.value = true
+  aiStreamingText.value = ''
+  stopFlag.value = false
+  try {
+    const full = await aiSvc.streamChat(
+      aiSvc.buildRequest({
+        baseUrl: provider.baseUrl,
+        apiKey: provider.apiKey,
+        model: aiModel.value || project.value.settings.model,
+        messages: [
+          { role: 'system', content: sysContent },
+          ...recent,
+          { role: 'user', content: userContent }
+        ],
+        temperature: 0.8,
+        maxTokens: 4096
+      }),
+      (chunk) => {
+        if (stopFlag.value) return
+        aiStreamingText.value += chunk
+      }
+    )
+    if (full) {
+      const parsed = parseQuestionBlock(full)
+      if (parsed) {
+        chatMessages.value.push({
+          role: 'assistant',
+          content: parsed.question,
+          options: parsed.options,
+          isQuestion: true
+        })
+      } else {
+        chatMessages.value.push({ role: 'assistant', content: full })
+      }
+    }
+  } catch (e: any) {
+    ElMessage.error('AI 调用失败：' + e.message)
+  } finally {
+    generating.value = false
+    aiStreamingText.value = ''
+  }
+}
+
+/**
+ * 用户主动点击"让 AI 提问"按钮，强制让 AI 给出 ABCD 选项
+ */
+async function askAiToQuestion(msg: EditorChatMessage) {
+  if (!project.value) return
+  const provider = getProvider()
+  if (!provider?.apiKey) {
+    ElMessage.warning('请先配置 API Key')
+    return
+  }
+  const ctx = buildContext()
+  const sysContent = `你是一位资深小说家。用户希望你在当前剧情节点给出 ABCD 四个走向选项让用户选择。严格按以下格式输出，不要其他文字：\n===QUESTION===\n问题：<基于当前剧情提出一个关键走向问题>\nA. <选项一>\nB. <选项二>\nC. <选项三>\nD. 自定义\n===END===`
+  const userContent = `【当前上下文】\n${ctx}\n\n上一段 AI 输出：\n${msg.content?.slice(-500) || '（无）'}\n\n请给出 ABCD 选项。`
+  // 先 push 一条提示
+  chatMessages.value.push({ role: 'user', content: '[让 AI 提问] 请基于当前剧情给出 ABCD 选项' })
+  generating.value = true
+  aiStreamingText.value = ''
+  stopFlag.value = false
+  try {
+    const full = await aiSvc.streamChat(
+      aiSvc.buildRequest({
+        baseUrl: provider.baseUrl,
+        apiKey: provider.apiKey,
+        model: aiModel.value || project.value.settings.model,
+        messages: [
+          { role: 'system', content: sysContent },
+          { role: 'user', content: userContent }
+        ],
+        temperature: 0.7,
+        maxTokens: 800
+      }),
+      (chunk) => {
+        if (stopFlag.value) return
+        aiStreamingText.value += chunk
+      }
+    )
+    if (full) {
+      const parsed = parseQuestionBlock(full)
+      if (parsed) {
+        chatMessages.value.push({
+          role: 'assistant',
+          content: parsed.question,
+          options: parsed.options,
+          isQuestion: true
+        })
+      } else {
+        // 没解析出来，把原文当普通消息
+        chatMessages.value.push({ role: 'assistant', content: full })
+      }
+    }
+  } catch (e: any) {
+    ElMessage.error('AI 调用失败：' + e.message)
+  } finally {
+    generating.value = false
+    aiStreamingText.value = ''
+  }
+}
+
+/**
+ * 渲染消息内容：把纯文本转为带换行的 HTML（用于 v-html）
+ */
+function renderMessage(text: string): string {
+  if (!text) return ''
+  return escapeHtml(text).replace(/\n/g, '<br>')
 }
 
 function copyText(text: string) {
@@ -1042,6 +1482,19 @@ watch(() => route.params.chapterId, async (id) => {
 }
 .tb-fn-btn:hover { background: #e8eaed; color: #1a202c; }
 .tb-fn-btn .el-icon { font-size: 13px; }
+.tb-fn-btn.tb-fn-active {
+  background: var(--primary, #5b9bd5);
+  color: #fff;
+}
+.tb-fn-btn.tb-fn-active:hover { background: var(--primary-dark, #3b82c4); color: #fff; }
+.tb-sep {
+  display: inline-block;
+  width: 1px;
+  height: 18px;
+  background: #e2e8f0;
+  margin: 0 4px;
+}
+html.dark .tb-sep { background: #334155; }
 .tb-fn-danger { color: #e53e3e !important; font-weight: 600; }
 .tb-fn-danger:hover { background: #fed7d7 !important; color: #c53030 !important; }
 
@@ -1614,4 +2067,75 @@ watch(() => route.params.chapterId, async (id) => {
 .history-item:hover { background: #edf2f7; }
 .history-title { font-size: 13px; color: #2d3748; font-weight: 500; }
 .history-time { margin-top: 2px; }
+
+/* ===== @ 关联菜单（复用 slash-menu 样式） ===== */
+.at-menu { /* 与 .slash-menu 同位置，独立标记便于扩展 */ }
+
+/* ===== AI 提问选项卡片 ===== */
+.chat-options-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+.options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.option-btn {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 6px;
+  background: var(--panel, #f8fafc);
+  color: var(--text, #1e293b);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+.option-btn:hover:not(.selected) {
+  border-color: var(--primary, #5b9bd5);
+  background: var(--primary-light, #e0f2fe);
+}
+.option-btn.selected {
+  border-color: var(--primary, #5b9bd5);
+  background: var(--primary, #5b9bd5);
+  color: #fff;
+  cursor: default;
+}
+.option-btn.custom .option-letter {
+  background: #f59e0b;
+}
+.option-btn.selected .option-letter {
+  background: rgba(255,255,255,0.25);
+  color: #fff;
+}
+.option-letter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--primary-light, #e0f2fe);
+  color: var(--primary, #5b9bd5);
+  font-weight: 600;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.option-text {
+  flex: 1;
+  line-height: 1.5;
+}
+.option-selected-hint {
+  font-size: 12px;
+  color: var(--primary, #5b9bd5);
+  padding: 4px 0 0;
+  text-align: right;
+}
 </style>

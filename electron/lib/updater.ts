@@ -135,18 +135,38 @@ function notifyUpdate(release: GitHubRelease) {
   }
 }
 
+/**
+ * 选择要下载的资产：
+ * 1) 优先 Setup.exe / .exe（NSIS 安装版，可自动启动安装）
+ * 2) 其次 .zip（免安装版，下载后打开所在目录让用户手动解压）
+ * 3) 最后回退到第一个资产
+ */
+function pickAsset(assets: GitHubRelease['assets']): GitHubRelease['assets'][number] | null {
+  if (!assets || !assets.length) return null
+  // 优先匹配 Setup.exe / NSIS 安装包
+  const exe = assets.find(a =>
+    /\.exe$/i.test(a.name) && /setup|installer|install/i.test(a.name)
+  ) || assets.find(a => /\.exe$/i.test(a.name))
+  if (exe) return exe
+  // 其次选 zip 免安装版
+  const zip = assets.find(a => /\.zip$/i.test(a.name))
+  if (zip) return zip
+  // 回退到第一个
+  return assets[0]
+}
+
 function buildPayload(release: GitHubRelease) {
-  // 选最大的资产作为下载目标（通常是 Setup.exe，约 90MB；免安装版 172MB）
-  const setupAsset = release.assets.find(a => /setup/i.test(a.name)) || release.assets[0]
+  const asset = pickAsset(release.assets)
   return {
     version: release.tag_name,
     name: release.name || release.tag_name,
     notes: release.body || '',
     date: release.published_at || '',
     url: release.html_url || '',
-    downloadUrl: setupAsset?.browser_download_url || '',
-    downloadSize: setupAsset?.size || 0,
-    downloadName: setupAsset?.name || ''
+    downloadUrl: asset?.browser_download_url || '',
+    downloadSize: asset?.size || 0,
+    downloadName: asset?.name || '',
+    isArchive: asset ? /\.(zip|7z|tar\.gz|tar)$/i.test(asset.name) : false
   }
 }
 
@@ -208,18 +228,19 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
     // 获取最新 release 信息
     const release = await fetchLatestRelease()
     if (!release) throw new Error('未找到任何发布版本')
-    const setupAsset = release.assets.find(a => /setup/i.test(a.name)) || release.assets[0]
-    if (!setupAsset) throw new Error('该版本未上传可下载的文件')
+    const asset = pickAsset(release.assets)
+    if (!asset) throw new Error('该版本未上传可下载的文件')
 
-    sendProgress(5, `正在下载 ${setupAsset.name}（${(setupAsset.size / 1024 / 1024).toFixed(2)} MB）...`)
+    const isArchive = /\.(zip|7z|tar\.gz|tar)$/i.test(asset.name)
+    sendProgress(5, `正在下载 ${asset.name}（${(asset.size / 1024 / 1024).toFixed(2)} MB）...`)
 
     // 创建缓存目录
     const cacheDir = path.join(app.getPath('userData'), 'update-cache')
     if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
-    const savePath = path.join(cacheDir, setupAsset.name)
+    const savePath = path.join(cacheDir, asset.name)
 
     // 使用 fetch 流式下载（Electron 31 内置）
-    const resp = await fetch(setupAsset.browser_download_url, {
+    const resp = await fetch(asset.browser_download_url, {
       headers: {
         'User-Agent': 'ai-novel-writer-updater',
         'Accept': 'application/octet-stream'
@@ -230,7 +251,7 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
     if (!resp.body) throw new Error('下载失败：无响应体')
 
     const totalStr = resp.headers.get('content-length') || ''
-    const total = parseInt(totalStr, 10) || setupAsset.size
+    const total = parseInt(totalStr, 10) || asset.size
 
     sendProgress(10, `开始下载（共 ${(total / 1024 / 1024).toFixed(2)} MB）...`)
 
@@ -279,6 +300,15 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
     const stat = fs.statSync(savePath)
     if (stat.size < 1000) {
       throw new Error('下载文件过小，可能不是有效的安装包')
+    }
+
+    if (isArchive) {
+      // 压缩包：在资源管理器中显示，让用户手动解压
+      sendProgress(100, '下载完成，已在资源管理器中显示文件，请手动解压替换旧版本')
+      await new Promise(r => setTimeout(r, 600))
+      shell.showItemInFolder(savePath)
+      // 不强制退出应用，让用户自行决定何时替换
+      return { success: true }
     }
 
     sendProgress(98, '下载完成，正在启动安装程序...')

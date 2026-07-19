@@ -13,7 +13,7 @@
         <div class="section-title">外观</div>
 
         <el-form-item label="主题">
-          <el-radio-group v-model="form.theme" @change="onThemeChange">
+          <el-radio-group v-model="form.themeMode" @change="onThemeChange">
             <el-radio-button label="light">
               <el-icon><Sunny /></el-icon>
               <span style="margin-left: 4px">浅色</span>
@@ -22,18 +22,25 @@
               <el-icon><Moon /></el-icon>
               <span style="margin-left: 4px">深色</span>
             </el-radio-button>
+            <el-radio-button label="auto">
+              <el-icon><Monitor /></el-icon>
+              <span style="margin-left: 4px">跟随系统</span>
+            </el-radio-button>
           </el-radio-group>
+          <span class="text-faint text-xs" style="margin-left: 12px">
+            切换立即生效，无需重启
+          </span>
         </el-form-item>
 
         <el-form-item label="字体大小">
           <div class="slider-row">
-            <el-slider v-model="form.fontSize" :min="12" :max="20" :step="1" style="flex: 1" />
+            <el-slider v-model="form.fontSize" :min="12" :max="20" :step="1" style="flex: 1" @input="onFontChange" />
             <span class="slider-val">{{ form.fontSize }}px</span>
           </div>
         </el-form-item>
 
         <el-form-item label="编辑器字体">
-          <el-select v-model="form.editorFont" style="width: 100%">
+          <el-select v-model="form.editorFont" style="width: 100%" @change="onFontChange">
             <el-option label="思源宋体" value="思源宋体" />
             <el-option label="思源黑体" value="思源黑体" />
             <el-option label="微软雅黑" value="微软雅黑" />
@@ -166,6 +173,13 @@
       <div class="card section-card">
         <div class="section-title">应用更新</div>
 
+        <el-form-item label="当前版本">
+          <el-tag size="small" effect="plain">v{{ currentVersion }}</el-tag>
+          <span v-if="lastCheckTime" class="text-faint text-xs" style="margin-left: 12px">
+            上次检查：{{ lastCheckTime }}
+          </span>
+        </el-form-item>
+
         <el-form-item label="自动检查">
           <el-switch v-model="form.autoUpdateCheck" />
           <span class="text-faint text-xs" style="margin-left: 12px">
@@ -174,12 +188,17 @@
         </el-form-item>
 
         <el-form-item label="手动检查">
-          <el-button type="primary" :loading="checking" :icon="Refresh" @click="checkNow">
-            立即检查更新
-          </el-button>
-          <span v-if="checkResult" class="text-faint text-xs" style="margin-left: 12px">
-            {{ checkResult }}
-          </span>
+          <div class="update-check-row">
+            <el-button type="primary" :loading="checking" :icon="Refresh" @click="checkNow">
+              立即检查更新
+            </el-button>
+            <el-button v-if="checkResult && !checking" :icon="Link" @click="openReleases" title="在浏览器中打开 Release 页面">
+              查看发布页
+            </el-button>
+            <span v-if="checkResult" class="text-faint text-xs" style="margin-left: 12px">
+              {{ checkResult }}
+            </span>
+          </div>
         </el-form-item>
       </div>
 
@@ -195,7 +214,7 @@ import { ref, reactive, computed, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  ArrowLeft, Check, Plus, Sunny, Moon, Refresh
+  ArrowLeft, Check, Plus, Sunny, Moon, Refresh, Monitor, Link
 } from '@element-plus/icons-vue'
 import { useSettingsStore } from '@/stores/settings'
 import type { AppSettings } from '@/types'
@@ -211,6 +230,7 @@ const form = reactive<AppSettings>({
   defaultBaseUrl: '',
   apiKeys: [],
   theme: 'light',
+  themeMode: 'light',
   fontSize: 14,
   editorFont: '思源宋体',
   autoSaveInterval: 30,
@@ -218,27 +238,45 @@ const form = reactive<AppSettings>({
   searchProvider: 'duckduckgo',
   searchApiKey: '',
   autoUpdateCheck: true,
-  lastCommitSha: ''
+  lastCommitSha: '',
+  askMode: 'auto'
 })
 
 const modelOptions = computed(() => settingsStore.availableModels())
 
+// 当前版本号 — 从 package.json 注入到 vite define 或回退到 1.0.0
+const currentVersion = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_APP_VERSION) || '1.0.0'
+
 const checking = ref(false)
 const checkResult = ref('')
+const lastCheckTime = ref('')
+let lastReleaseUrl = ''
 
 async function checkNow() {
   checking.value = true
-  checkResult.value = ''
+  checkResult.value = '正在检查...'
   try {
     const r = await window.api.updater.check()
-    if (r?.updated) {
-      checkResult.value = `发现新版本：${(r.message || '').split('\n')[0]}`
+    lastCheckTime.value = new Date().toLocaleString('zh-CN', { hour12: false })
+    if (!r) {
+      checkResult.value = '检查失败：未收到响应'
+      ElMessage.error(checkResult.value)
+      return
+    }
+    if (r.updated) {
+      // 发现新版本 — 通知已通过 onUpdateAvailable 推送，对话框会自动弹出
+      lastReleaseUrl = r.releaseUrl || ''
+      const name = (r.releaseName || r.version || '').split('\n')[0]
+      checkResult.value = `发现新版本：${r.version}（${name}）`
       ElMessage.success('发现新版本，请查看更新提示')
-    } else if (r?.sha) {
-      checkResult.value = `已是最新（${r.sha.slice(0, 7)}）`
-      ElMessage.info('当前已是最新版本')
+    } else if (r.hasRelease) {
+      // 已是最新
+      lastReleaseUrl = r.releaseUrl || ''
+      checkResult.value = `已是最新版本（${r.version}）`
+      ElMessage.success('当前已是最新版本')
     } else {
-      checkResult.value = '检查失败，请稍后重试'
+      checkResult.value = '暂无可用的发布版本'
+      ElMessage.info('暂无可用的发布版本')
     }
   } catch (e: any) {
     checkResult.value = '检查失败：' + (e?.message || '未知错误')
@@ -246,6 +284,11 @@ async function checkNow() {
   } finally {
     checking.value = false
   }
+}
+
+function openReleases() {
+  const url = lastReleaseUrl || 'https://github.com/3960922808-jpg/ai-novel-writer/releases'
+  window.open(url, '_blank')
 }
 
 const modelInputVisible = ref<Record<number, boolean>>({})
@@ -276,10 +319,22 @@ function fillForm(s: AppSettings) {
   if (!form.searchApiKey) form.searchApiKey = ''
   if (form.autoUpdateCheck === undefined || form.autoUpdateCheck === null) form.autoUpdateCheck = true
   if (!form.lastCommitSha) form.lastCommitSha = ''
+  // themeMode 兼容：旧数据只有 theme，没有 themeMode
+  if (!form.themeMode) {
+    form.themeMode = form.theme === 'dark' ? 'dark' : 'light'
+  }
+  // askMode 兼容
+  if (!form.askMode) form.askMode = 'auto'
 }
 
 function onThemeChange() {
-  settingsStore.update({ theme: form.theme })
+  // 立即生效，无需点"保存设置"
+  settingsStore.update({ themeMode: form.themeMode })
+}
+
+function onFontChange() {
+  // 字体大小/编辑器字体实时预览
+  settingsStore.update({ fontSize: form.fontSize, editorFont: form.editorFont })
 }
 
 function showModelInput(idx: number) {
@@ -408,5 +463,11 @@ async function save() {
   display: flex;
   gap: 12px;
   margin: 4px 0 24px;
+}
+.update-check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 </style>

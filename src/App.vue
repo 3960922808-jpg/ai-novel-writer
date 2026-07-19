@@ -23,8 +23,23 @@
           <span class="update-date">{{ formatDate(updateInfo?.date) }}</span>
         </div>
         <div class="update-message">{{ firstLine(updateInfo?.notes) }}</div>
+        <el-button
+          v-if="updateInfo?.notes && updateInfo.notes.includes('\n')"
+          text
+          size="small"
+          @click="showFullNotes = !showFullNotes"
+          style="padding: 0 0 8px"
+        >
+          {{ showFullNotes ? '收起更新日志' : '展开完整更新日志' }}
+        </el-button>
+        <div v-if="showFullNotes" class="update-notes-full">{{ updateInfo?.notes }}</div>
         <div class="update-tip">
-          点击"立即更新"将自动下载安装包（{{ formatSize(updateInfo?.downloadSize) }}）并启动安装程序。
+          <template v-if="updateInfo?.isArchive">
+            点击"立即更新"将下载免安装压缩包（{{ formatSize(updateInfo?.downloadSize) }}），下载完成后会自动在资源管理器中显示，请手动解压替换旧版本。
+          </template>
+          <template v-else>
+            点击"立即更新"将自动下载安装包（{{ formatSize(updateInfo?.downloadSize) }}）并启动安装程序。
+          </template>
         </div>
       </template>
 
@@ -51,15 +66,17 @@
           <span>更新失败</span>
         </div>
         <div class="update-message error">{{ downloadStatus }}</div>
-        <div class="update-tip">请检查网络连接后重试，或稍后再试。</div>
+        <div class="update-tip">请检查网络连接后重试，或稍后再试。也可点击"前往发布页"手动下载。</div>
       </template>
     </div>
 
     <template #footer>
+      <el-button v-if="downloadState === 'idle'" @click="openReleasePage">前往发布页</el-button>
       <el-button v-if="downloadState === 'idle'" @click="updateDialogVisible = false">稍后再说</el-button>
       <el-button v-if="downloadState === 'idle'" type="primary" :icon="Download" @click="startDownload">
         立即更新
       </el-button>
+      <el-button v-if="downloadState === 'error'" @click="openReleasePage">前往发布页</el-button>
       <el-button v-if="downloadState === 'error'" @click="updateDialogVisible = false">关闭</el-button>
       <el-button v-if="downloadState === 'error'" type="primary" @click="startDownload">重试</el-button>
     </template>
@@ -82,10 +99,12 @@ interface UpdateInfo {
   downloadUrl: string
   downloadSize: number
   downloadName: string
+  isArchive?: boolean
 }
 
 const updateDialogVisible = ref(false)
 const updateInfo = ref<UpdateInfo | null>(null)
+const showFullNotes = ref(false)
 
 // 下载状态
 type DownloadState = 'idle' | 'downloading' | 'error' | 'done'
@@ -164,11 +183,16 @@ async function startDownload() {
       downloadState.value = 'error'
       downloadStatus.value = r.error || '下载失败'
     }
-    // 成功的话，应用会自动重启，无需处理
+    // 成功的话，应用会自动重启（exe 安装包），或仅显示文件位置（zip 免安装版）
   } catch (e: any) {
     downloadState.value = 'error'
     downloadStatus.value = e?.message || '下载失败'
   }
+}
+
+function openReleasePage() {
+  const url = updateInfo.value?.url || 'https://github.com/3960922808-jpg/ai-novel-writer/releases'
+  window.open(url, '_blank')
 }
 </script>
 
@@ -219,6 +243,18 @@ async function startDownload() {
   color: var(--el-text-color-secondary);
   font-size: 12px;
   line-height: 1.6;
+}
+.update-notes-full {
+  background: var(--el-fill-color-light);
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  margin-bottom: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  color: var(--el-text-color-regular);
 }
 .update-status {
   font-size: 12px;

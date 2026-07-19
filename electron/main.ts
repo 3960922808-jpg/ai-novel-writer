@@ -148,10 +148,18 @@ app.whenReady().then(async () => {
     registerExportIPC()
     registerFileIPC()
     registerSearchIPC()
-    // 手动检查更新
+    // 手动检查更新 — 返回完整信息给前端展示
     ipcMain.handle('updater:check', async () => {
       const r = await checkOnce({ silent: false })
-      return { updated: r.updated, version: r.version || '', releaseName: r.release?.name || '' }
+      return {
+        updated: r.updated,
+        version: r.version || '',
+        releaseName: r.release?.name || '',
+        releaseNotes: r.release?.body || '',
+        releaseUrl: r.release?.html_url || '',
+        releaseDate: r.release?.published_at || '',
+        hasRelease: !!r.release
+      }
     })
     // 下载并自动重启
     ipcMain.handle('updater:download', async () => {

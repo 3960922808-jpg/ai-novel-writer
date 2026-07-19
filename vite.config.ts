@@ -2,8 +2,15 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import electron from 'vite-plugin-electron/simple'
 import path from 'node:path'
+import fs from 'node:fs'
+
+// 读取 package.json 的版本号注入到前端
+const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8'))
 
 export default defineConfig({
+  define: {
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkg.version || '0.0.0')
+  },
   plugins: [
     vue(),
     electron({

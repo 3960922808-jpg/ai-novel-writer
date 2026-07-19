@@ -78,6 +78,7 @@ const api = {
       downloadUrl: string
       downloadSize: number
       downloadName: string
+      isArchive?: boolean
     }) => void) => {
       const listener = (_e: any, info: any) => cb(info)
       ipcRenderer.on('updater:available', listener)

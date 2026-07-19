@@ -200,6 +200,10 @@ export interface AppSettings {
   // 自动更新检查
   autoUpdateCheck: boolean
   lastCommitSha: string
+  // AI 提问模式：auto=卡壳时问 / always=每次都问 / never=从不问
+  askMode: 'auto' | 'always' | 'never'
+  // 主题模式：light/dark/auto（auto 跟随系统）
+  themeMode?: 'light' | 'dark' | 'auto'
 }
 
 /** Skill（技能）— 比普通提示词更高级的 AI 工作流 */
@@ -249,6 +253,18 @@ export interface StyleProfile {
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
+  /** AI 提问时的选项（ABCD） */
+  options?: ChatOption[]
+  /** 用户选择了哪个选项（index） */
+  selectedOption?: number
+  /** 该消息是否为提问消息 */
+  isQuestion?: boolean
+}
+
+/** AI 提问选项 */
+export interface ChatOption {
+  text: string
+  isCustom?: boolean
 }
 
 /** AI 请求 */
