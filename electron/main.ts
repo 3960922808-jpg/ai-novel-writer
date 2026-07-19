@@ -32,7 +32,16 @@ function findPreload(): string {
 
 let mainWindow: BrowserWindow | null = null
 
+// 图标路径：开发模式用 build/icon.ico，打包后从 resources 读取
+function getIconPath(): string {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'icon.ico')
+  }
+  return path.join(__dirname, '..', 'build', 'icon.ico')
+}
+
 function createWindow() {
+  const iconPath = getIconPath()
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -41,6 +50,8 @@ function createWindow() {
     show: false,
     backgroundColor: '#1a1a1a',
     title: 'AI 写小说',
+    icon: iconPath,
+    autoHideMenuBar: true, // 隐藏菜单栏（按 Alt 仍可临时显示）
     webPreferences: {
       preload: findPreload(),
       contextIsolation: true,
@@ -48,54 +59,9 @@ function createWindow() {
     }
   })
 
-  // 自定义菜单
-  const template: Electron.MenuItemConstructorOptions[] = [
-    {
-      label: '文件',
-      submenu: [
-        { label: '新建项目', accelerator: 'CmdOrCtrl+N', click: () => mainWindow?.webContents.send('menu:new-project') },
-        { type: 'separator' },
-        { label: '导出 Markdown', accelerator: 'CmdOrCtrl+E', click: () => mainWindow?.webContents.send('menu:export-md') },
-        { label: '导出 EPUB', click: () => mainWindow?.webContents.send('menu:export-epub') },
-        { label: '导出 DOCX', click: () => mainWindow?.webContents.send('menu:export-docx') },
-        { type: 'separator' },
-        { role: 'quit' }
-      ]
-    },
-    {
-      label: '编辑',
-      submenu: [
-        { role: 'undo', label: '撤销' },
-        { role: 'redo', label: '重做' },
-        { type: 'separator' },
-        { role: 'cut', label: '剪切' },
-        { role: 'copy', label: '复制' },
-        { role: 'paste', label: '粘贴' },
-        { role: 'selectAll', label: '全选' }
-      ]
-    },
-    {
-      label: '视图',
-      submenu: [
-        { role: 'reload', label: '重新加载' },
-        { role: 'toggleDevTools', label: '开发者工具' },
-        { type: 'separator' },
-        { role: 'resetZoom', label: '重置缩放' },
-        { role: 'zoomIn', label: '放大' },
-        { role: 'zoomOut', label: '缩小' },
-        { type: 'separator' },
-        { role: 'togglefullscreen', label: '全屏' }
-      ]
-    },
-    {
-      label: '帮助',
-      submenu: [
-        { label: '关于 AI 写小说', click: () => shell.openExternal('https://github.com/ilrein/openwrite') },
-        { label: 'OpenWrite 项目', click: () => shell.openExternal('https://ilrein.github.io/openwrite/') }
-      ]
-    }
-  ]
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+  // 完全移除应用菜单栏（去掉左上角的"文件/编辑/视图/帮助"）
+  // 保留 Ctrl+C / Ctrl+V 等基础快捷键 — 这些是 Electron 默认行为，不需要菜单
+  Menu.setApplicationMenu(null)
 
   // 开发模式加载 dev server，生产模式加载打包文件
   const isDev = !app.isPackaged
@@ -136,6 +102,18 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  // 设置任务栏图标（Windows）
+  if (process.platform === 'win32') {
+    try {
+      const iconPath = getIconPath()
+      if (fs.existsSync(iconPath)) {
+        app.setIcon(iconPath)
+        console.log('[main] 已设置应用图标:', iconPath)
+      }
+    } catch (e) {
+      console.error('[main] 设置图标失败:', e)
+    }
+  }
   try {
     await initDB()
     console.log('[main] 数据库初始化成功')

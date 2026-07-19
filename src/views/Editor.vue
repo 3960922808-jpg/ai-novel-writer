@@ -181,7 +181,7 @@
           </div>
 
           <!-- 章节概要卡片 -->
-          <div class="summary-card">
+          <div class="summary-card" v-show="!headCollapsed">
             <div class="summary-left">
               <el-icon><Document /></el-icon>
               <span>章节概要</span>
@@ -194,6 +194,16 @@
             <div class="summary-content text-faint" v-else>暂无概要，可点击"总结当前章节"由 AI 自动生成</div>
           </div>
         </div>
+
+        <!-- 收起箭头：点击收起章节标题/概要区，给编辑区让出更多空间 -->
+        <button
+          class="collapse-head-btn"
+          :class="{ collapsed: headCollapsed }"
+          :title="headCollapsed ? '展开章节概要' : '收起章节概要'"
+          @click="headCollapsed = !headCollapsed"
+        >
+          <el-icon><ArrowDown v-if="!headCollapsed" /><ArrowRight v-else /></el-icon>
+        </button>
 
         <!-- 编辑区 -->
         <div class="write-area" :style="{ fontFamily: editorFont }">
@@ -455,6 +465,8 @@ const chapter = ref<Chapter | null>(null)
 const leftCollapsed = ref(false)
 const mainContentExpanded = ref(true)
 const searchVisible = ref(false)
+// 章节概要卡片是否收起（点击小箭头切换）
+const headCollapsed = ref(false)
 const searchKeyword = ref('')
 const searchMatches = ref(0)
 const chatSessionId = ref('default')
@@ -1673,6 +1685,28 @@ html.dark .tb-sep { background: #334155; }
 .chapter-head {
   padding: 18px 32px 12px;
   border-bottom: 1px solid #f1f2f5;
+}
+/* 收起箭头按钮：位于章节概要下方、编辑区工具栏上方 */
+.collapse-head-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 18px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-3, #a0aec0);
+  font-size: 12px;
+  transition: background 0.15s, color 0.15s;
+}
+.collapse-head-btn:hover {
+  background: #f7fafc;
+  color: #4a5568;
+}
+.collapse-head-btn.collapsed {
+  /* 收起状态下稍小一点 */
+  height: 16px;
 }
 .chapter-title-row {
   display: flex;
