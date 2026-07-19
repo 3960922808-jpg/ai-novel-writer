@@ -102,18 +102,8 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  // 设置任务栏图标（Windows）
-  if (process.platform === 'win32') {
-    try {
-      const iconPath = getIconPath()
-      if (fs.existsSync(iconPath)) {
-        app.setIcon(iconPath)
-        console.log('[main] 已设置应用图标:', iconPath)
-      }
-    } catch (e) {
-      console.error('[main] 设置图标失败:', e)
-    }
-  }
+  // Windows 任务栏图标通过 BrowserWindow 的 icon 选项设置（见 createWindow）
+  // Electron 31 的 App 类型没有公开 setIcon，这里不调用
   try {
     await initDB()
     console.log('[main] 数据库初始化成功')
