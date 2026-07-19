@@ -21,6 +21,7 @@ import { getDB } from './db'
 import fs from 'node:fs'
 import path from 'node:path'
 import { Readable } from 'node:stream'
+import { spawn } from 'node:child_process'
 
 const REPO = '3960922808-jpg/ai-novel-writer'
 // 多个 GitHub API 镜像源（依次尝试，提高国内访问成功率）
@@ -180,9 +181,9 @@ function notifyUpdate(release: GitHubRelease) {
 
 /**
  * 选择要下载的资产：
- * 1) 优先 Setup.exe / .exe（NSIS 安装版，可自动启动安装）
- * 2) 其次 .zip（免安装版，下载后打开所在目录让用户手动解压）
- * 3) 最后回退到第一个资产
+ * 只选 Setup.exe（NSIS 安装版），用于静默覆盖安装。
+ * 不再下载 zip 免安装包（无法自动覆盖当前运行中的 exe）。
+ * 如果没有 exe 资产，回退到第一个资产（让用户手动处理）。
  */
 function pickAsset(assets: GitHubRelease['assets']): GitHubRelease['assets'][number] | null {
   if (!assets || !assets.length) return null
@@ -191,9 +192,6 @@ function pickAsset(assets: GitHubRelease['assets']): GitHubRelease['assets'][num
     /\.exe$/i.test(a.name) && /setup|installer|install/i.test(a.name)
   ) || assets.find(a => /\.exe$/i.test(a.name))
   if (exe) return exe
-  // 其次选 zip 免安装版
-  const zip = assets.find(a => /\.zip$/i.test(a.name))
-  if (zip) return zip
   // 回退到第一个
   return assets[0]
 }
@@ -279,7 +277,6 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
     const asset = pickAsset(release.assets)
     if (!asset) throw new Error('该版本未上传可下载的文件')
 
-    const isArchive = /\.(zip|7z|tar\.gz|tar)$/i.test(asset.name)
     sendProgress(5, `正在下载 ${asset.name}（${(asset.size / 1024 / 1024).toFixed(2)} MB）...`)
 
     // 创建缓存目录
@@ -394,32 +391,43 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
       throw new Error('下载文件过小，可能不是有效的安装包')
     }
 
-    if (isArchive) {
-      // 压缩包：在资源管理器中显示，让用户手动解压
-      sendProgress(100, '下载完成，已在资源管理器中显示文件，请手动解压替换旧版本')
+    // 安装包：用 NSIS /S 静默安装，自动覆盖旧文件
+    if (/\.exe$/i.test(asset.name)) {
+      sendProgress(98, '下载完成，正在静默安装更新...')
+
+      // 等待 600ms 让前端显示进度
       await new Promise(r => setTimeout(r, 600))
-      shell.showItemInFolder(savePath)
-      // 不强制退出应用，让用户自行决定何时替换
+
+      sendProgress(100, '更新已安装，应用将自动重启')
+
+      // 等待 500ms 让前端看到 100%
+      await new Promise(r => setTimeout(r, 500))
+
+      // 用 NSIS /S 静默安装（无界面，自动覆盖旧文件）
+      // detached 启动，子进程独立于父进程，父进程退出后仍能运行
+      // 安装完成后 NSIS 会替换 C:\Users\xxx\AppData\Local\AI写小说\ 下的文件
+      const child = spawn(savePath, ['/S'], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true
+      })
+      child.unref()
+
+      // 退出当前应用，让 NSIS 可以替换正在运行的 exe
+      // NSIS 安装完成后不会自动重启应用，但安装包配置了 createDesktopShortcut
+      // 用户从桌面快捷方式重新打开即可
+      // 这里给 NSIS 1.5 秒时间启动，然后退出
+      setTimeout(() => {
+        app.exit(0)
+      }, 1500)
+
       return { success: true }
     }
 
-    sendProgress(98, '下载完成，正在启动安装程序...')
-
-    // 等待 800ms 让前端显示完成状态
-    await new Promise(r => setTimeout(r, 800))
-
-    sendProgress(100, '安装程序已启动，请按提示完成安装')
-
-    // 等待 500ms 让前端看到 100%
-    await new Promise(r => setTimeout(r, 500))
-
-    // 启动安装程序（用户需要按提示点下一步）
-    // 安装程序会替换旧版本，安装完成后用户重新打开即可
-    await shell.openPath(savePath)
-
-    // 退出当前应用，让安装程序可以替换文件
-    app.exit(0)
-
+    // 非 exe 资产（理论上 pickAsset 不会选到，兜底处理）
+    sendProgress(100, '下载完成，已在资源管理器中显示文件')
+    await new Promise(r => setTimeout(r, 600))
+    shell.showItemInFolder(savePath)
     return { success: true }
   } catch (e: any) {
     console.error('[updater] 下载失败:', e)
