@@ -126,7 +126,8 @@ app.whenReady().then(async () => {
         releaseNotes: r.release?.body || '',
         releaseUrl: r.release?.html_url || '',
         releaseDate: r.release?.published_at || '',
-        hasRelease: !!r.release
+        hasRelease: !!r.release,
+        error: r.error || ''
       }
     })
     // 下载并自动重启

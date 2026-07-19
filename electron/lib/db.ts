@@ -47,6 +47,13 @@ export async function initDB() {
   if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true })
   const dbFile = path.join(dbDir, 'db.json')
   db = await JSONFilePreset<DBShape>(dbFile, defaultData)
+  // 修复老版本 db：补齐缺失的 collection（避免 .filter undefined 崩溃）
+  for (const k of Object.keys(defaultData) as (keyof DBShape)[]) {
+    if (!Array.isArray((db.data as any)[k])) {
+      ;(db.data as any)[k] = []
+    }
+  }
+  if (!db.data.settings) db.data.settings = null
   await db.write()
   // 初始化内置提示词
   await seedBuiltInPrompts()

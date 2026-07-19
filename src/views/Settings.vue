@@ -263,6 +263,13 @@ async function checkNow() {
       ElMessage.error(checkResult.value)
       return
     }
+    // 网络错误（所有 GitHub 源都失败）
+    if (r.error) {
+      lastReleaseUrl = r.releaseUrl || 'https://github.com/3960922808-jpg/ai-novel-writer/releases'
+      checkResult.value = `检查失败：${r.error}`
+      ElMessage.warning(checkResult.value + '，可点击"查看发布页"手动下载')
+      return
+    }
     if (r.updated) {
       // 发现新版本 — 通知已通过 onUpdateAvailable 推送，对话框会自动弹出
       lastReleaseUrl = r.releaseUrl || ''

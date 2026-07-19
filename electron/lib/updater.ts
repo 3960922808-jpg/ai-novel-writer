@@ -10,6 +10,11 @@
  *   2. 通过 IPC 推送下载进度
  *   3. 下载完成后启动安装程序并退出当前应用
  * - 本地版本号从 package.json 读取
+ *
+ * 网络优化（解决国内访问 GitHub 慢/失败的问题）：
+ * - API 检查：依次尝试多个镜像源（api.github.com → ghproxy 镜像 → jsdelivr）
+ * - 下载：优先 GitHub 直链，失败回退 ghproxy 加速
+ * - 超时：8 秒 AbortController，避免长时间挂起
  */
 import { app, BrowserWindow, Notification, shell } from 'electron'
 import { getDB } from './db'
@@ -18,9 +23,24 @@ import path from 'node:path'
 import { Readable } from 'node:stream'
 
 const REPO = '3960922808-jpg/ai-novel-writer'
-const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`
+// 多个 GitHub API 镜像源（依次尝试，提高国内访问成功率）
+const API_ENDPOINTS = [
+  `https://api.github.com/repos/${REPO}/releases/latest`,
+  `https://ghproxy.com/https://api.github.com/repos/${REPO}/releases/latest`,
+  `https://gh-proxy.com/https://api.github.com/repos/${REPO}/releases/latest`,
+  `https://mirror.ghproxy.com/https://api.github.com/repos/${REPO}/releases/latest`
+]
+// ghproxy 下载加速前缀（用于 GitHub release assets 直链下载）
+const DOWNLOAD_PROXIES = [
+  '', // 直链优先
+  'https://ghproxy.com/',
+  'https://gh-proxy.com/',
+  'https://mirror.ghproxy.com/'
+]
 const INITIAL_DELAY_MS = 10_000
 const INTERVAL_MS = 30 * 60 * 1000 // 30 分钟
+const FETCH_TIMEOUT_MS = 8_000 // 8 秒超时
+const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000 // 下载 5 分钟超时
 
 let timer: NodeJS.Timeout | null = null
 let lastKnownVersion = ''
@@ -70,16 +90,39 @@ function compareVersions(a: string, b: string): number {
   return 0
 }
 
+/**
+ * 依次尝试多个 GitHub API 镜像源获取最新 release
+ * 任一源成功即返回；全部失败抛出最后一个错误
+ */
 async function fetchLatestRelease(): Promise<GitHubRelease | null> {
-  const res = await fetch(RELEASES_API, {
-    headers: {
-      'Accept': 'application/vnd.github+json',
-      'User-Agent': 'ai-novel-writer-updater'
+  let lastErr: any = null
+  for (const url of API_ENDPOINTS) {
+    try {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+      const res = await fetch(url, {
+        headers: {
+          'Accept': 'application/vnd.github+json',
+          'User-Agent': 'ai-novel-writer-updater'
+        },
+        signal: controller.signal
+      })
+      clearTimeout(timeout)
+      if (res.status === 404) return null // 还没有 release
+      if (!res.ok) {
+        lastErr = new Error(`GitHub API ${res.status} (${url})`)
+        continue
+      }
+      const data = await res.json() as GitHubRelease
+      console.log(`[updater] 成功从 ${url} 获取最新 release`)
+      return data
+    } catch (e: any) {
+      lastErr = e
+      console.warn(`[updater] ${url} 失败:`, e?.message || e)
+      // 继续尝试下一个源
     }
-  })
-  if (res.status === 404) return null // 还没有 release
-  if (!res.ok) throw new Error(`GitHub API ${res.status}`)
-  return await res.json() as GitHubRelease
+  }
+  throw lastErr || new Error('所有 GitHub API 源均不可用')
 }
 
 function getSettings() {
@@ -170,7 +213,7 @@ function buildPayload(release: GitHubRelease) {
   }
 }
 
-async function checkOnce(opts: { silent?: boolean } = {}): Promise<{ updated: boolean; version?: string; release?: GitHubRelease }> {
+async function checkOnce(opts: { silent?: boolean } = {}): Promise<{ updated: boolean; version?: string; release?: GitHubRelease; error?: string }> {
   if (isChecking) return { updated: false }
   isChecking = true
   try {
@@ -196,9 +239,14 @@ async function checkOnce(opts: { silent?: boolean } = {}): Promise<{ updated: bo
     }
     lastKnownVersion = remoteVersion
     return { updated: false, version: remoteVersion, release }
-  } catch (e) {
+  } catch (e: any) {
     console.error('[updater] 检查失败:', e)
-    return { updated: false }
+    const errMsg = e?.name === 'AbortError'
+      ? '连接超时'
+      : e?.message?.includes('Failed to fetch') || e?.message?.includes('fetch failed')
+        ? '无法连接 GitHub，请检查网络或稍后重试'
+        : e?.message || '未知错误'
+    return { updated: false, error: errMsg }
   } finally {
     isChecking = false
   }
@@ -239,16 +287,47 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
     if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
     const savePath = path.join(cacheDir, asset.name)
 
-    // 使用 fetch 流式下载（Electron 31 内置）
-    const resp = await fetch(asset.browser_download_url, {
-      headers: {
-        'User-Agent': 'ai-novel-writer-updater',
-        'Accept': 'application/octet-stream'
-      },
-      redirect: 'follow'
-    })
-    if (!resp.ok) throw new Error(`下载失败：HTTP ${resp.status}`)
-    if (!resp.body) throw new Error('下载失败：无响应体')
+    // 构造多个下载源（直链优先 → ghproxy 加速）
+    const downloadUrls = DOWNLOAD_PROXIES.map(p => p + asset.browser_download_url)
+
+    // 依次尝试下载源，成功即用
+    let resp: Response | null = null
+    let usedUrl = ''
+    let lastErr: any = null
+    for (const url of downloadUrls) {
+      try {
+        sendProgress(8, `正在连接下载源...`)
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 15_000) // 连接超时 15 秒
+        const r = await fetch(url, {
+          headers: {
+            'User-Agent': 'ai-novel-writer-updater',
+            'Accept': 'application/octet-stream'
+          },
+          redirect: 'follow',
+          signal: controller.signal
+        })
+        clearTimeout(timeout)
+        if (!r.ok) {
+          lastErr = new Error(`HTTP ${r.status}`)
+          continue
+        }
+        if (!r.body) {
+          lastErr = new Error('无响应体')
+          continue
+        }
+        resp = r
+        usedUrl = url
+        console.log(`[updater] 下载源选择: ${url}`)
+        break
+      } catch (e: any) {
+        lastErr = e
+        console.warn(`[updater] 下载源 ${url} 连接失败:`, e?.message || e)
+      }
+    }
+    if (!resp) {
+      throw new Error(`所有下载源均不可用：${lastErr?.message || '未知错误'}。请前往 GitHub Release 页面手动下载。`)
+    }
 
     const totalStr = resp.headers.get('content-length') || ''
     const total = parseInt(totalStr, 10) || asset.size
@@ -261,10 +340,20 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
 
     let received = 0
     let lastPct = 10
+    // 下载超时保护：5 分钟无新数据则中止
+    let downloadTimer: NodeJS.Timeout | null = setTimeout(() => {
+      try { reader.destroy(new Error('下载超时')) } catch {}
+    }, DOWNLOAD_TIMEOUT_MS)
 
     await new Promise<void>((resolve, reject) => {
       let chunkIndex = 0
       reader.on('data', (chunk: Buffer) => {
+        // 收到数据就重置超时
+        if (downloadTimer) clearTimeout(downloadTimer)
+        downloadTimer = setTimeout(() => {
+          try { reader.destroy(new Error('下载超时')) } catch {}
+        }, 30_000) // 30 秒无数据则超时
+
         received += chunk.length
         fileStream.write(chunk)
         chunkIndex++
@@ -282,16 +371,19 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
         }
       })
       reader.on('end', () => {
+        if (downloadTimer) clearTimeout(downloadTimer)
         fileStream.end(() => {
           sendProgress(95, '下载完成，正在校验...')
           resolve()
         })
       })
       reader.on('error', (err: any) => {
+        if (downloadTimer) clearTimeout(downloadTimer)
         fileStream.destroy()
         reject(err)
       })
       fileStream.on('error', (err: any) => {
+        if (downloadTimer) clearTimeout(downloadTimer)
         reject(err)
       })
     })
@@ -331,8 +423,13 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
     return { success: true }
   } catch (e: any) {
     console.error('[updater] 下载失败:', e)
-    sendProgress(-1, `下载失败：${e?.message || '未知错误'}`)
-    return { success: false, error: e?.message || '未知错误' }
+    const errMsg = e?.name === 'AbortError'
+      ? '连接超时，请检查网络后重试'
+      : e?.message?.includes('Failed to fetch') || e?.message?.includes('fetch failed')
+        ? '网络连接失败，可能是 GitHub 被屏蔽。请检查网络后重试，或前往 GitHub Release 页面手动下载。'
+        : e?.message || '未知错误'
+    sendProgress(-1, `下载失败：${errMsg}`)
+    return { success: false, error: errMsg }
   } finally {
     isDownloading = false
   }

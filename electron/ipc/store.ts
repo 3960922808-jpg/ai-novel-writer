@@ -40,10 +40,16 @@ export function registerStoreIPC() {
 
   ipcMain.handle('store:project:delete', async (_e, id: string) => {
     const db = getDB()
-    db.data.projects = db.data.projects.filter(p => p.id !== id)
-    // 级联删除
+    // 防御性检查：projects 或某个 collection 可能未初始化
+    if (Array.isArray(db.data.projects)) {
+      db.data.projects = db.data.projects.filter(p => p.id !== id)
+    }
+    // 级联删除所有关联集合
     for (const c of COLLECTIONS) {
-      ;(db.data as any)[c] = (db.data as any)[c].filter((x: any) => x.projectId !== id)
+      const arr = (db.data as any)[c]
+      if (Array.isArray(arr)) {
+        ;(db.data as any)[c] = arr.filter((x: any) => x.projectId !== id)
+      }
     }
     await db.write()
     return true

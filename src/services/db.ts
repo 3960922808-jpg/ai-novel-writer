@@ -17,7 +17,11 @@ const C = window.api.store
 // ====== 项目 ======
 export const listProjects = (): Promise<Project[]> => C.getProjects()
 export const getProject = (id: string): Promise<Project | null> => C.getProject(id)
-export const saveProject = (p: Partial<Project> & { title: string }): Promise<Project> => C.saveProject(p)
+export const saveProject = (p: Partial<Project> & { title: string }): Promise<Project> => {
+  // 防止 Vue reactive proxy 触发 "An object could not be cloned."
+  const plain = p == null ? p : JSON.parse(JSON.stringify(p))
+  return C.saveProject(plain)
+}
 export const deleteProject = (id: string): Promise<boolean> => C.deleteProject(id)
 
 // ====== 通用集合 ======
@@ -28,18 +32,26 @@ export async function getOne<T>(collection: Collection, id: string): Promise<T |
   return C.get(collection, id) as Promise<T | null>
 }
 export async function save(collection: Collection, doc: any): Promise<any> {
-  return C.save(collection, doc)
+  // IPC 走 structured clone，不能直接传 Vue reactive proxy / Tiptap editor 对象，
+  // 否则会报 "An object could not be cloned."
+  // 用 JSON 序列化为纯对象，顺便剥离函数/Symbol/不可枚举属性
+  const plain = doc == null ? doc : JSON.parse(JSON.stringify(doc))
+  return C.save(collection, plain)
 }
 export async function remove(collection: Collection, id: string): Promise<boolean> {
   return C.delete(collection, id)
 }
 export async function bulkSave(collection: Collection, docs: any[]): Promise<any[]> {
-  return C.bulkSave(collection, docs) as Promise<any[]>
+  const plain = (docs || []).map(d => (d == null ? d : JSON.parse(JSON.stringify(d))))
+  return C.bulkSave(collection, plain) as Promise<any[]>
 }
 
 // ====== 设置 ======
 export const getSettings = (): Promise<AppSettings> => C.getSettings()
-export const saveSettings = (s: Partial<AppSettings>): Promise<AppSettings> => C.saveSettings(s)
+export const saveSettings = (s: Partial<AppSettings>): Promise<AppSettings> => {
+  const plain = s == null ? s : JSON.parse(JSON.stringify(s))
+  return C.saveSettings(plain)
+}
 
 // ====== 类型化的快捷方法 ======
 export const Chapters = {
