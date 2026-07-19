@@ -1,0 +1,132 @@
+name: Build & Release Windows
+
+# 触发条件：
+# 1. 推送 v* 开头的 tag（如 v1.0.1）→ 自动构建并发布到 Release
+# 2. 手动触发（在 GitHub Actions 页面点 Run workflow）
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '版本号（如 v1.0.1，必须与 package.json 一致）'
+        required: true
+        default: 'v1.0.1'
+
+# 在 Actions 页面手动取消正在运行的构建
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write   # 发布 Release 需要
+
+jobs:
+  build:
+    name: Build Windows zip + installer
+    runs-on: windows-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 配置 npm 国内镜像（加速依赖安装）
+        run: npm config set registry https://registry.npmmirror.com
+
+      - name: 设置 Electron 国内镜像
+        shell: pwsh
+        run: |
+          "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/" >> $env:GITHUB_ENV
+          "ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/" >> $env:GITHUB_ENV
+          Write-Host "ELECTRON_MIRROR = $env:ELECTRON_MIRROR"
+
+      - name: 安装依赖
+        run: npm install --no-audit --no-fund
+
+      - name: 类型检查 + 前端构建
+        run: npm run build
+
+      - name: 打包 Windows 解压即用 zip + NSIS 安装包
+        run: npm run build:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          USE_HARD_LINKS: false
+
+      - name: 列出 release 目录所有产物
+        shell: pwsh
+        run: |
+          Write-Host "=== release 目录 ==="
+          Get-ChildItem -Path release -Recurse -File | ForEach-Object {
+            $sizeMb = [math]::Round($_.Length / 1MB, 2)
+            Write-Host ("{0,-70} {1,10} MB" -f $_.FullName.Replace("$pwd\", ""), $sizeMb)
+          }
+
+      - name: 计算版本号与 tag
+        id: version
+        shell: pwsh
+        run: |
+          # 优先用触发的 tag，其次用 workflow_dispatch 输入，最后从 package.json 读
+          if ($env:GITHUB_REF -match 'refs/tags/(v.*)') {
+            $tag = $matches[1]
+          } elseif ("${{ github.event.inputs.tag }}") {
+            $tag = "${{ github.event.inputs.tag }}"
+          } else {
+            $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+            $tag = "v" + $pkg.version
+          }
+          $ver = $tag.TrimStart('v')
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "ver=$ver" >> $env:GITHUB_OUTPUT
+          Write-Host "Tag: $tag, Version: $ver"
+
+      - name: 上传构建产物到 Action Artifacts（备份）
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI写小说-${{ steps.version.outputs.ver }}
+          path: |
+            release/*.zip
+            release/*.exe
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: 发布到 GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: AI写小说 ${{ steps.version.outputs.tag }}
+          body: |
+            # AI写小说 ${{ steps.version.outputs.tag }}
+
+            ## 下载说明
+
+            ### 方式一：解压即用（推荐，无需安装）
+            1. 下载 `AI写小说-${{ steps.version.outputs.ver }}-x64.zip`
+            2. 解压到任意目录（如 `D:\AI写小说`）
+            3. 双击解压出来的 `AI写小说.exe` 直接运行，无需安装
+
+            ### 方式二：安装版
+            1. 下载 `AI写小说-Setup-${{ steps.version.outputs.ver }}.exe`
+            2. 双击运行，按提示完成安装
+            3. 安装完成后，桌面会出现「AI写小说」快捷方式
+
+            ## 使用前准备
+            - 首次启动后，进入「设置」页面配置 AI API Key
+            - 支持 OpenAI / DeepSeek / 智谱 / 月之暗面 / 通义千问 等主流模型
+
+            ## 完整源码
+            https://github.com/3960922808-jpg/ai-novel-writer
+          files: |
+            release/*.zip
+            release/*.exe
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

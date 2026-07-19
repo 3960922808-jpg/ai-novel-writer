@@ -1,6 +1,6 @@
 {
   "name": "ai-novel-writer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "AI 写小说 - Windows 桌面版（对标 OpenWrite 全功能）",
   "author": "AI Novel Writer",
   "main": "dist-electron/main.js",
@@ -60,17 +60,23 @@
     "win": {
       "target": [
         {
+          "target": "zip",
+          "arch": ["x64"]
+        },
+        {
           "target": "nsis",
           "arch": ["x64"]
         }
-      ]
+      ],
+      "artifactName": "AI写小说-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "AI写小说"
+      "shortcutName": "AI写小说",
+      "artifactName": "AI写小说-Setup-${version}.${ext}"
     }
   }
 }
