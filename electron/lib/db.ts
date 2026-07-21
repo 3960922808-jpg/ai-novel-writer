@@ -96,6 +96,50 @@ export async function initDB() {
     }
   }
   if (!db.data.settings) db.data.settings = null
+  // v1.4.2：迁移老用户默认 apiKeys 中的过期模型名到最新版本
+  // 仅在用户尚未自定义（apiKey 仍为空）的 provider 上做自动升级，避免覆盖用户已添加的自定义模型
+  if (db.data.settings && Array.isArray(db.data.settings.apiKeys)) {
+    const MODEL_MIGRATIONS: { provider: string; baseUrl?: string; oldModels: string[]; newModels: string[]; newBaseUrl?: string }[] = [
+      {
+        provider: 'OpenAI',
+        oldModels: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+        newModels: ['gpt-5.5', 'gpt-5.5-pro', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano']
+      },
+      {
+        provider: 'DeepSeek',
+        oldModels: ['deepseek-chat', 'deepseek-reasoner'],
+        newModels: ['deepseek-v4-pro', 'deepseek-v4-flash']
+      },
+      {
+        provider: '智谱AI',
+        oldModels: ['glm-4', 'glm-4-flash', 'glm-4-air', 'glm-4-long'],
+        newModels: ['glm-5.2', 'glm-5.2-air', 'glm-5.2-flash'],
+        newBaseUrl: 'https://api.z.ai/api/paas/v4'
+      },
+      {
+        provider: 'MiniMax',
+        oldModels: ['abab6.5-chat', 'abab6.5s-chat', 'abab6.5g-chat', 'abab6-chat'],
+        newModels: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.5']
+      }
+    ]
+    let migrated = false
+    for (const p of db.data.settings.apiKeys) {
+      const m = MODEL_MIGRATIONS.find(x => x.provider === p.provider)
+      if (!m) continue
+      // 只在 apiKey 仍为空（即用户未启用此 provider）时迁移
+      if (p.apiKey) continue
+      const hasOld = (p.models || []).some((mo: string) => m.oldModels.includes(mo))
+      const hasNew = (p.models || []).some((mo: string) => m.newModels.includes(mo))
+      if (hasOld && !hasNew) {
+        p.models = [...m.newModels]
+        if (m.newBaseUrl) p.baseUrl = m.newBaseUrl
+        migrated = true
+      }
+    }
+    if (migrated) {
+      console.log('[settings] v1.4.2: 已自动迁移老 provider 的过期模型名到最新版本')
+    }
+  }
   await db.write()
   // 初始化内置提示词
   await seedBuiltInPrompts()

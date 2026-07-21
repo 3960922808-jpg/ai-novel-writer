@@ -124,10 +124,10 @@ export function registerStoreIPC() {
         defaultModel: '',
         defaultBaseUrl: '',
         apiKeys: [
-          { provider: 'OpenAI', baseUrl: 'https://api.openai.com/v1', apiKey: '', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo'] },
-          { provider: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', apiKey: '', models: ['deepseek-chat', 'deepseek-reasoner'] },
-          { provider: '通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', apiKey: '', models: ['qwen-max', 'qwen-plus', 'qwen-turbo'] },
-          { provider: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', apiKey: '', models: ['anthropic/claude-3.5-sonnet', 'openai/gpt-4o', 'google/gemini-pro'] }
+          { provider: 'OpenAI', baseUrl: 'https://api.openai.com/v1', apiKey: '', models: ['gpt-5.5', 'gpt-5.5-pro', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano'] },
+          { provider: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', apiKey: '', models: ['deepseek-v4-pro', 'deepseek-v4-flash'] },
+          { provider: '智谱AI', baseUrl: 'https://api.z.ai/api/paas/v4', apiKey: '', models: ['glm-5.2', 'glm-5.2-air', 'glm-5.2-flash'] },
+          { provider: 'MiniMax', baseUrl: 'https://api.minimax.chat/v1', apiKey: '', models: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.5'] }
         ],
         theme: 'light',
         fontSize: 16,

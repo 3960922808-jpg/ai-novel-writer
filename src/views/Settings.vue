@@ -73,25 +73,25 @@
                   <el-dropdown-item command="openai">
                     <div class="quick-item">
                       <div class="quick-name">OpenAI</div>
-                      <div class="quick-desc text-faint text-xs">gpt-4o / gpt-4o-mini 等</div>
+                      <div class="quick-desc text-faint text-xs">GPT-5.5 / GPT-5.4 系列</div>
                     </div>
                   </el-dropdown-item>
                   <el-dropdown-item command="deepseek">
                     <div class="quick-item">
                       <div class="quick-name">DeepSeek</div>
-                      <div class="quick-desc text-faint text-xs">deepseek-chat / deepseek-reasoner</div>
+                      <div class="quick-desc text-faint text-xs">DeepSeek-V4-Pro / V4-Flash</div>
                     </div>
                   </el-dropdown-item>
                   <el-dropdown-item command="zhipu">
                     <div class="quick-item">
                       <div class="quick-name">智谱 AI</div>
-                      <div class="quick-desc text-faint text-xs">glm-4 / glm-4-flash 等</div>
+                      <div class="quick-desc text-faint text-xs">GLM-5.2 系列（1M 上下文）</div>
                     </div>
                   </el-dropdown-item>
                   <el-dropdown-item command="minimax">
                     <div class="quick-item">
                       <div class="quick-name">MiniMax</div>
-                      <div class="quick-desc text-faint text-xs">abab6.5 / abab6.5s 等</div>
+                      <div class="quick-desc text-faint text-xs">MiniMax-M3 / M2.7 系列</div>
                     </div>
                   </el-dropdown-item>
                   <el-dropdown-item command="custom" divided>
@@ -368,7 +368,8 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'OpenAI',
     provider: 'OpenAI',
     baseUrl: 'https://api.openai.com/v1',
-    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+    // 2026 年 GPT-5.5 / GPT-5.4 系列，已弃用 GPT-4o / GPT-3.5
+    models: ['gpt-5.5', 'gpt-5.5-pro', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano'],
     website: 'https://platform.openai.com/api-keys'
   },
   {
@@ -376,23 +377,26 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'DeepSeek',
     provider: 'DeepSeek',
     baseUrl: 'https://api.deepseek.com/v1',
-    models: ['deepseek-chat', 'deepseek-reasoner'],
+    // 2026 年 4 月发布 V4 系列（1M 上下文 + Thinking 模式），已弃用 deepseek-chat / deepseek-reasoner
+    models: ['deepseek-v4-pro', 'deepseek-v4-flash'],
     website: 'https://platform.deepseek.com/api_keys'
   },
   {
     key: 'zhipu',
     label: '智谱 AI',
     provider: '智谱AI',
-    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-    models: ['glm-4', 'glm-4-flash', 'glm-4-air', 'glm-4-long'],
-    website: 'https://open.bigmodel.cn/usercenter/apikeys'
+    // GLM-5.2（2026-06 发布，1M 上下文，MIT 开源），新域名 z.ai
+    baseUrl: 'https://api.z.ai/api/paas/v4',
+    models: ['glm-5.2', 'glm-5.2-air', 'glm-5.2-flash'],
+    website: 'https://z.ai/manage-apikey/apikey-list'
   },
   {
     key: 'minimax',
     label: 'MiniMax',
     provider: 'MiniMax',
     baseUrl: 'https://api.minimax.chat/v1',
-    models: ['abab6.5-chat', 'abab6.5s-chat', 'abab6.5g-chat', 'abab6-chat'],
+    // 2026 年 M3（06 月发布，1M 上下文）+ M2.7（03 月发布，200K 上下文）
+    models: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.5'],
     website: 'https://platform.minimaxi.com/user-center/basic-information/interface-key'
   }
 ]
