@@ -36,6 +36,16 @@
         <el-button :icon="Share" @click="insertWorkflowTemplate">插入工作流模板</el-button>
         <el-button :icon="DocumentChecked" @click="saveAll">保存布局</el-button>
         <el-button :icon="Download" @click="exportWorkflowMarkdown" :disabled="nodes.length === 0">导出工作流</el-button>
+        <el-popconfirm
+          title="确定清空画布所有节点？此操作不可恢复"
+          confirm-button-text="清空"
+          cancel-button-text="取消"
+          @confirm="clearAll"
+        >
+          <template #reference>
+            <el-button type="danger" :icon="Delete" :disabled="nodes.length === 0">清空画布</el-button>
+          </template>
+        </el-popconfirm>
         <el-button type="success" :icon="MagicStick" :loading="generating" :disabled="nodes.length === 0" @click="generateChapterFromWorkflow">
           AI 生成章节
         </el-button>
@@ -89,11 +99,12 @@
           <div
             v-for="node in nodes"
             :key="node.id"
-            class="node"
+            class="node-circle"
             :class="[typeClass(node.type), { 'connect-mode': connectMode, 'drop-target': dragFrom && dragFrom.nodeId !== node.id && hoverNodeId === node.id, 'is-workflow': isWorkflowType(node.type) }]"
             :style="nodeStyle(node)"
             @mousedown.left="startDrag($event, node)"
             @dblclick="edit(node)"
+            @contextmenu.prevent="edit(node)"
             @mouseenter="hoverNodeId = node.id"
             @mouseleave="hoverNodeId = ''"
           >
@@ -113,16 +124,13 @@
             <button class="node-del" title="删除" @click.stop="remove(node)">
               <el-icon><Close /></el-icon>
             </button>
-            <div class="node-header">
-              <span v-if="isWorkflowType(node.type) && workflowIndex(node) >= 0" class="node-order">#{{ workflowIndex(node) + 1 }}</span>
-              <span class="node-tag">{{ typeLabel(node.type) }}</span>
+            <!-- 圆形节点内容：编号 + 类型首字 -->
+            <div class="circle-inner">
+              <span v-if="isWorkflowType(node.type) && workflowIndex(node) >= 0" class="circle-order">{{ workflowIndex(node) + 1 }}</span>
+              <span v-else class="circle-icon-text">{{ typeLabel(node.type).slice(0, 1) }}</span>
             </div>
-            <div class="node-title">{{ node.title || '未命名' }}</div>
-            <div v-if="node.aiPrompt" class="node-ai-prompt" title="AI 提示词">
-              <el-icon><MagicStick /></el-icon>
-              <span>{{ shortContent(node.aiPrompt) }}</span>
-            </div>
-            <div v-if="node.content" class="node-content">{{ shortContent(node.content) }}</div>
+            <!-- 节点标题（圆形下方） -->
+            <div class="circle-title">{{ node.title || typeLabel(node.type) }}</div>
           </div>
         </div>
         <div v-if="nodes.length === 0" class="canvas-empty">
@@ -271,7 +279,7 @@ import { ref, computed, reactive, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus, Close, Connection, ArrowDown, ArrowRight, DocumentChecked, InfoFilled,
-  ArrowLeft, MagicStick, Download, Share, DocumentCopy, Check
+  ArrowLeft, MagicStick, Download, Share, DocumentCopy, Check, Delete
 } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { useSettingsStore } from '@/stores/settings'
@@ -428,11 +436,9 @@ function nodeStyle(node: CanvasNode) {
     left: node.x + 'px',
     top: node.y + 'px',
     width: node.width + 'px',
-    minHeight: node.height + 'px',
-    borderLeftColor: color,
-    borderTopColor: color,
-    borderRightColor: color,
-    borderBottomColor: color
+    height: node.height + 'px',
+    borderColor: color,
+    backgroundColor: color + '22'
   }
 }
 
@@ -622,8 +628,8 @@ async function addNode(type: CanvasNode['type']) {
       type,
       x: 80 + offset,
       y: 80 + offset,
-      width: 220,
-      height: 140,
+      width: 80,
+      height: 80,
       title: `新${TYPE_LABELS[type]}`,
       content: '',
       aiPrompt: '',
@@ -716,6 +722,21 @@ async function remove(node: CanvasNode) {
 
 // ===== 工作流相关功能 =====
 
+// 一键清空画布
+async function clearAll() {
+  if (nodes.value.length === 0) return
+  try {
+    const list = [...nodes.value]
+    for (const n of list) {
+      await db.Canvas.remove(n.id)
+    }
+    nodes.value = []
+    ElMessage.success(`已清空 ${list.length} 个节点`)
+  } catch (e: any) {
+    ElMessage.error('清空失败：' + e.message)
+  }
+}
+
 // 一键插入标准三幕剧工作流模板（5 个节点）
 const WORKFLOW_TEMPLATES: Array<{
   type: CanvasNode['type']
@@ -728,35 +749,35 @@ const WORKFLOW_TEMPLATES: Array<{
     type: 'start',
     title: '起点：故事开篇',
     aiPrompt: '介绍主角、世界观、初始状态。展示主角的日常生活，让读者了解故事发生的背景与人物处境。',
-    x: 80,
+    x: 60,
     y: 200
   },
   {
     type: 'inciting',
     title: '触发事件：打破平衡',
     aiPrompt: '一个突发事件打破主角的平静生活，迫使主角踏上旅程。事件要有冲击力，明确主角的目标与阻碍。',
-    x: 380,
+    x: 200,
     y: 200
   },
   {
     type: 'rising',
     title: '发展：冲突升级',
     aiPrompt: '主角在追求目标的过程中遇到一系列障碍，冲突不断升级。铺设伏笔，引入新角色或新信息，节奏逐渐加快。',
-    x: 680,
+    x: 340,
     y: 200
   },
   {
     type: 'climax',
     title: '高潮：最大冲突',
     aiPrompt: '全书最大冲突爆发，主角面临最艰难的抉择或最强对手。所有伏笔在此回收，情感与张力达到顶点。',
-    x: 980,
+    x: 480,
     y: 200
   },
   {
     type: 'resolution',
     title: '结局：解决与新生',
     aiPrompt: '冲突解决，主角完成成长。展示新的平衡状态，留下余韵或为后续故事铺垫。',
-    x: 1280,
+    x: 620,
     y: 200
   }
 ]
@@ -782,8 +803,8 @@ async function insertWorkflowTemplate() {
         type: tpl.type,
         x: tpl.x,
         y: tpl.y + order * 20,
-        width: 220,
-        height: 140,
+        width: 80,
+        height: 80,
         title: tpl.title,
         content: '',
         aiPrompt: tpl.aiPrompt,
@@ -1053,33 +1074,81 @@ async function copyGenerated() {
   pointer-events: none;
   z-index: 0;
 }
-.node {
+.node-circle {
   position: absolute;
-  background: var(--panel);
-  border: 2px solid;
-  border-radius: var(--radius);
-  padding: 10px 12px;
+  border: 3px solid;
+  border-radius: 50%;
   box-shadow: var(--shadow);
   cursor: move;
   user-select: none;
   z-index: 1;
-  transition: box-shadow 0.15s;
+  transition: transform 0.15s, box-shadow 0.15s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
 }
-.node:hover {
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
+.node-circle:hover {
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
   z-index: 2;
+  transform: scale(1.08);
 }
-.node:active {
+.node-circle:active {
   cursor: grabbing;
+  transform: scale(1.04);
 }
-/* 连线模式下仍可拖动方块，只是多了红点用于连线 */
-.node.connect-mode {
+/* 连线模式下仍可拖动节点 */
+.node-circle.connect-mode {
   cursor: move;
 }
 /* 连线模式下悬停目标高亮 */
-.node.drop-target {
-  box-shadow: 0 0 0 3px #ef4444, 0 6px 18px rgba(239, 68, 68, 0.3);
+.node-circle.drop-target {
+  box-shadow: 0 0 0 4px #ef4444, 0 6px 18px rgba(239, 68, 68, 0.35);
   border-color: #ef4444 !important;
+  transform: scale(1.12);
+}
+/* 圆形内部内容 */
+.circle-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.circle-order {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.6);
+}
+.circle-icon-text {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+/* 圆形下方标题 */
+.circle-title {
+  position: absolute;
+  bottom: -22px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--panel);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.node-circle.is-workflow {
+  border-width: 4px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
 }
 /* 红点 */
 .node-dot {
@@ -1108,8 +1177,8 @@ async function copyGenerated() {
 }
 .node-del {
   position: absolute;
-  top: -10px;
-  right: -10px;
+  top: -8px;
+  right: -8px;
   width: 22px;
   height: 22px;
   border-radius: 50%;
@@ -1124,30 +1193,8 @@ async function copyGenerated() {
   font-size: 12px;
   z-index: 3;
 }
-.node:hover .node-del {
+.node-circle:hover .node-del {
   display: flex;
-}
-.node-tag {
-  display: inline-block;
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--panel-2);
-  color: var(--text-2);
-  margin-bottom: 4px;
-}
-.node-title {
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--text);
-  margin-bottom: 4px;
-  word-break: break-all;
-}
-.node-content {
-  font-size: 12px;
-  color: var(--text-2);
-  line-height: 1.5;
-  word-break: break-all;
 }
 .canvas-empty {
   position: absolute;

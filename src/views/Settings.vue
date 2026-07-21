@@ -85,16 +85,33 @@
       </div>
 
       <div class="card section-card">
-        <div class="section-title">API 配置</div>
+        <div class="section-title-row">
+          <div class="section-title">API 配置</div>
+          <el-button size="small" :icon="Plus" type="primary" @click="addProvider">添加自定义 Provider</el-button>
+        </div>
 
-        <div v-for="(p, idx) in form.apiKeys" :key="p.provider" class="provider-card">
+        <div v-for="(p, idx) in form.apiKeys" :key="idx" class="provider-card">
           <div class="provider-header">
-            <div class="provider-name">{{ p.provider }}</div>
+            <el-input v-model="p.provider" size="small" style="width: 180px" placeholder="Provider 名称" />
             <el-tag size="small" effect="plain">{{ p.models.length }} 个模型</el-tag>
+            <div class="provider-actions">
+              <el-button
+                size="small"
+                :icon="Connection"
+                :loading="testingIdx === idx"
+                @click="testConnection(idx)"
+              >测试连通性</el-button>
+              <el-button size="small" type="danger" :icon="Delete" @click="removeProvider(idx)" />
+            </div>
+          </div>
+
+          <div v-if="testResults[idx]" class="test-result" :class="testResults[idx].ok ? 'ok' : 'fail'">
+            <el-icon><CircleCheck v-if="testResults[idx].ok" /><CircleClose v-else /></el-icon>
+            <span>{{ testResults[idx].msg }}</span>
           </div>
 
           <el-form-item label="BaseURL">
-            <el-input v-model="p.baseUrl" placeholder="API 地址" />
+            <el-input v-model="p.baseUrl" placeholder="API 地址，如 https://api.openai.com/v1" />
           </el-form-item>
 
           <el-form-item label="API Key">
@@ -224,7 +241,8 @@ import { ref, reactive, computed, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  ArrowLeft, Check, Plus, Sunny, Moon, Refresh, Monitor, Link
+  ArrowLeft, Check, Plus, Sunny, Moon, Refresh, Monitor, Link,
+  Connection, Delete, CircleCheck, CircleClose
 } from '@element-plus/icons-vue'
 import { useSettingsStore } from '@/stores/settings'
 import type { AppSettings } from '@/types'
@@ -312,6 +330,75 @@ function openReleases() {
 const modelInputVisible = ref<Record<number, boolean>>({})
 const modelInputValue = ref<Record<number, string>>({})
 const modelInputRefs = ref<any[] | null>(null)
+
+// 测试连通性状态
+const testingIdx = ref<number | null>(null)
+const testResults = ref<Record<number, { ok: boolean; msg: string }>>({})
+
+// 添加自定义 Provider
+function addProvider() {
+  form.apiKeys.push({
+    provider: `自定义 ${form.apiKeys.length + 1}`,
+    baseUrl: '',
+    apiKey: '',
+    models: []
+  })
+  ElMessage.success('已添加自定义 Provider，请填写信息')
+}
+
+// 删除 Provider
+function removeProvider(idx: number) {
+  if (form.apiKeys.length <= 1) {
+    ElMessage.warning('至少保留一个 Provider')
+    return
+  }
+  form.apiKeys.splice(idx, 1)
+}
+
+// 测试 Provider 连通性
+async function testConnection(idx: number) {
+  const p = form.apiKeys[idx]
+  if (!p.baseUrl) {
+    ElMessage.warning('请先填写 BaseURL')
+    return
+  }
+  testingIdx.value = idx
+  try {
+    const url = p.baseUrl.replace(/\/+$/, '') + '/models'
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (p.apiKey) headers['Authorization'] = `Bearer ${p.apiKey}`
+    const res = await fetch(url, { method: 'GET', headers })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      testResults.value[idx] = {
+        ok: false,
+        msg: `HTTP ${res.status} ${res.statusText}${text ? ' · ' + text.slice(0, 80) : ''}`
+      }
+      return
+    }
+    const data = await res.json()
+    const models: any[] = data?.data || data?.models || []
+    if (models.length > 0) {
+      // 自动填充模型列表
+      const ids: string[] = models.map((m: any) => m.id || m.name || m).filter(Boolean)
+      const newIds = ids.filter(id => !p.models.includes(id))
+      if (newIds.length > 0) p.models.push(...newIds)
+      testResults.value[idx] = {
+        ok: true,
+        msg: `连通成功 · 共 ${ids.length} 个模型${newIds.length > 0 ? ` · 已自动添加 ${newIds.length} 个新模型` : ''}`
+      }
+    } else {
+      testResults.value[idx] = { ok: true, msg: '连通成功（响应未返回模型列表，但 API 可用）' }
+    }
+  } catch (e: any) {
+    testResults.value[idx] = {
+      ok: false,
+      msg: '连接失败：' + (e?.message || '网络错误')
+    }
+  } finally {
+    testingIdx.value = null
+  }
+}
 
 onMounted(async () => {
   if (settingsStore.settings) {
@@ -473,8 +560,49 @@ async function save() {
 .provider-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 10px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.provider-header > .el-tag {
+  margin-right: auto;
+}
+.provider-actions {
+  display: flex;
+  gap: 6px;
+}
+.section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.section-title-row > .section-title {
+  margin-bottom: 0;
+  padding-left: 0;
+  border-left: none;
+}
+.test-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.test-result.ok {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.test-result.fail {
+  background: rgba(239, 68, 68, 0.08);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
 }
 .provider-name {
   font-weight: 600;

@@ -121,8 +121,15 @@ function goHome() {
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  transition: width 0.2s;
   flex-shrink: 0;
+  /* 使用 transform 加速，避免 width 动画导致重排卡顿 */
+  transition: width 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+              background-color 0.2s ease;
+  will-change: width;
+  /* 隔离重排，提升动画流畅度 */
+  contain: layout style;
+  /* GPU 提升层 */
+  backface-visibility: hidden;
 }
 .sidebar.collapsed { width: 60px; }
 .logo {
@@ -135,7 +142,14 @@ function goHome() {
   font-weight: 600;
   font-size: 16px;
 }
-.logo-text { white-space: nowrap; }
+.logo-text {
+  white-space: nowrap;
+  transition: opacity 0.2s ease;
+}
+.sidebar.collapsed .logo-text {
+  opacity: 0;
+  pointer-events: none;
+}
 .project-info {
   padding: 0 16px 12px;
   border-bottom: 1px solid var(--border);
@@ -158,6 +172,10 @@ function goHome() {
   flex: 1;
   overflow-y: auto;
   padding: 8px;
+  /* 平滑滚动 */
+  scroll-behavior: smooth;
+  /* 隔离重排 */
+  contain: strict;
 }
 .nav-item {
   display: flex;
@@ -169,7 +187,7 @@ function goHome() {
   text-decoration: none;
   font-size: 13px;
   margin-bottom: 2px;
-  transition: all 0.15s;
+  transition: background-color 0.15s ease, color 0.15s ease;
   cursor: pointer;
 }
 .nav-item:hover { background: var(--panel-2); color: var(--text); }
@@ -178,7 +196,14 @@ function goHome() {
   color: var(--primary);
   font-weight: 500;
 }
-.nav-label { white-space: nowrap; }
+.nav-label {
+  white-space: nowrap;
+  transition: opacity 0.2s ease;
+}
+.sidebar.collapsed .nav-label {
+  opacity: 0;
+  pointer-events: none;
+}
 .sidebar-footer {
   padding: 8px;
   border-top: 1px solid var(--border);
@@ -193,8 +218,13 @@ function goHome() {
   border-radius: 6px;
   display: flex;
   justify-content: center;
+  align-items: center;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 .collapse-btn:hover { background: var(--panel-2); color: var(--text); }
+.collapse-btn .el-icon {
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
 .main {
   flex: 1;
   overflow: hidden;
