@@ -35,6 +35,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'prompts', name: 'prompts', component: () => import('@/views/PromptLibrary.vue'), meta: { title: '提示词库' } },
       { path: 'goals', name: 'goals', component: () => import('@/views/WritingGoals.vue'), meta: { title: '写作目标' } },
       { path: 'critics', name: 'critics', component: () => import('@/views/AICritics.vue'), meta: { title: 'AI 评审' } },
+      { path: 'teardown', name: 'teardown', component: () => import('@/views/Teardown.vue'), meta: { title: '拆书分析' } },
       { path: 'truth', name: 'truth', component: () => import('@/views/TruthFiles.vue'), meta: { title: '真相文件' } },
       { path: 'search', name: 'search', component: () => import('@/views/WebSearch.vue'), meta: { title: '联网搜索' } },
       { path: 'skills', name: 'skills', component: () => import('@/views/Skills.vue'), meta: { title: '技能库' } },

@@ -538,9 +538,10 @@ function roleType(r: string): any {
 }
 
 function avatarColor(name: string) {
+  const safeName = name || '?'
   const colors = ['#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#06b6d4']
   let h = 0
-  for (const c of name) h = (h * 31 + c.charCodeAt(0)) | 0
+  for (const c of safeName) h = (h * 31 + c.charCodeAt(0)) | 0
   return colors[Math.abs(h) % colors.length]
 }
 

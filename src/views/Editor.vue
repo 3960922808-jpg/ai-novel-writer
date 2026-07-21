@@ -29,12 +29,6 @@
           <el-icon><Promotion /></el-icon><span>不提问</span>
         </button>
         <span class="tb-sep"></span>
-        <button class="tb-fn-btn" @click="runTopAction('teardown')">
-          <el-icon><Document /></el-icon><span>AI拆书</span>
-        </button>
-        <button class="tb-fn-btn" @click="runTopAction('review')">
-          <el-icon><Checked /></el-icon><span>AI审稿</span>
-        </button>
         <button class="tb-fn-btn" @click="runTopAction('depolish')">
           <el-icon><Brush /></el-icon><span>AI消痕</span>
         </button>
@@ -246,9 +240,9 @@
             <p class="chat-empty-title">对话区域</p>
             <p class="chat-empty-tip">输入任何你对小说的疑问，比如"人物设定如何修改"，"文章建议"。</p>
             <p class="chat-empty-tip">提示：输入 <code class="hint-code">/</code> 可触发技能，输入 <code class="hint-code">@</code> 可关联章节内容</p>
-            <button class="canvas-link-btn" @click="goToCanvas">
+            <button class="canvas-link-btn" :class="{ 'canvas-linked': canvasLinked }" @click="linkCanvas">
               <el-icon><Connection /></el-icon>
-              <span>打开故事画布</span>
+              <span>{{ canvasLinked ? '已链接故事画布' : '链接故事画布' }}</span>
             </button>
           </div>
           <div v-else class="chat-list">
@@ -453,7 +447,7 @@ import { useSettingsStore } from '@/stores/settings'
 import * as db from '@/services/db'
 import * as aiSvc from '@/services/ai'
 import { Skills as SkillsDB } from '@/services/db'
-import type { Chapter, Prompt, Skill } from '@/types'
+import type { Chapter, Prompt, Skill, CanvasNode } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -485,6 +479,59 @@ function goToCanvas() {
   if (project.value) {
     router.push({ name: 'canvas', params: { id: project.value.id } })
   }
+}
+
+// 链接故事画布：启用后 AI 续写会按工作流节点顺序生成情节
+const canvasLinked = ref(false)
+const canvasWorkflow = ref<CanvasNode[]>([])
+
+async function linkCanvas() {
+  if (!project.value) return
+  if (canvasLinked.value) {
+    // 已链接，点击为取消链接
+    canvasLinked.value = false
+    canvasWorkflow.value = []
+    ElMessage.info('已取消链接故事画布')
+    return
+  }
+  // 加载画布工作流节点
+  try {
+    const all = await db.Canvas.list(project.value.id)
+    const workflowTypes = ['start', 'inciting', 'rising', 'climax', 'resolution']
+    const workflow = all
+      .filter(n => (workflowTypes as string[]).includes(n.type))
+      .sort((a, b) => {
+        const ai2 = workflowTypes.indexOf(a.type)
+        const bi2 = workflowTypes.indexOf(b.type)
+        if (ai2 !== bi2) return ai2 - bi2
+        return (a.order || 0) - (b.order || 0)
+      })
+    if (workflow.length === 0) {
+      ElMessage.warning('故事画布暂无工作流节点，请先到故事画布添加 start/inciting/rising/climax/resolution 类型节点，或点击「插入工作流模板」')
+      return
+    }
+    canvasWorkflow.value = workflow
+    canvasLinked.value = true
+    ElMessage.success(`已链接故事画布，共 ${workflow.length} 个工作流节点，AI 续写将按此顺序推进情节`)
+  } catch (e: any) {
+    ElMessage.error('加载画布失败：' + (e?.message || e))
+  }
+}
+
+// 构建画布工作流的上下文提示词（供 sendChat 使用）
+function buildCanvasContext(): string {
+  if (!canvasLinked.value || canvasWorkflow.value.length === 0) return ''
+  const parts: string[] = []
+  parts.push('【故事画布工作流】请按以下工作流节点顺序推进剧情：')
+  canvasWorkflow.value.forEach((n, idx) => {
+    const typeLabel: Record<string, string> = {
+      start: '起点', inciting: '触发事件', rising: '发展', climax: '高潮', resolution: '结局'
+    }
+    const label = typeLabel[n.type] || n.type
+    parts.push(`${idx + 1}. [${label}] ${n.title || ''}：${n.aiPrompt || n.content || '（无具体提示）'}`)
+  })
+  parts.push('请严格按上述工作流顺序推进当前章节的情节发展。')
+  return parts.join('\n')
 }
 
 function toggleMainContent() {
@@ -931,6 +978,11 @@ async function sendChat() {
       ? '\n\n【交互规则】只在以下情况向用户提问：1) 剧情走向有多种可能且无法判断用户偏好 2) 角色动机/设定存在矛盾 3) 用户提供的信息不足。提问时使用 ===QUESTION=== ... ===END=== 格式给出 ABCD 三个选项加 D 自定义。能够确定方向时直接续写，不要每段都问。'
       : '\n\n【交互规则】直接续写，不要提问。'
   let sysContent = `你是一位资深小说家，擅长${project.value.genre}类型创作。请直接输出正文内容，不要写"以下是续写"等说明性文字，不要使用 markdown 代码块。文风自然流畅，避免AI味。${project.value.settings.styleSample ? '\n参考文风：' + project.value.settings.styleSample : ''}${askModePrompt}`
+  // 链接故事画布时，把工作流注入 system prompt
+  const canvasCtx = buildCanvasContext()
+  if (canvasCtx) {
+    sysContent += '\n\n' + canvasCtx
+  }
   let userContent = userMsg
 
   // 自动填充变量的辅助函数
@@ -1277,10 +1329,8 @@ function runTopAction(action: string) {
     historyVisible.value = true
     return
   }
-  // 把功能映射到内置提示词或技能
+  // 把功能映射到内置提示词或技能（已移除 AI 拆书和 AI 审稿，独立到拆书板块）
   const actionMap: Record<string, string> = {
-    teardown: '拆书',
-    review: '评审',
     depolish: '润色',
     typo: '校对',
     format: '排版'
@@ -1293,7 +1343,7 @@ function runTopAction(action: string) {
   } else {
     // 回退到内置提示词
     const all = [...builtinPrompts.value, ...projectPrompts.value]
-    const promptCat: Record<string, string> = { teardown: '摘要', review: '评审', depolish: '润色', typo: '评审', format: '润色' }
+    const promptCat: Record<string, string> = { depolish: '润色', typo: '评审', format: '润色' }
     const tpl = all.find(p => p.category === promptCat[action])
     if (tpl) {
       selectedPromptId.value = tpl.id
@@ -1931,17 +1981,27 @@ html.dark .tb-sep { background: #334155; }
   gap: 6px;
   padding: 8px 16px;
   border: 1px solid #2563eb;
-  background: #e6f0ff;
-  color: #2563eb;
+  background: #f5f7fa;
+  color: #606266;
   border-radius: 6px;
   cursor: pointer;
   font-size: 13px;
   font-weight: 500;
-  transition: all 0.15s;
+  transition: all 0.2s;
 }
 .canvas-link-btn:hover {
+  background: #e6f0ff;
+  color: #2563eb;
+}
+/* 链接激活状态：偏蓝色高亮 */
+.canvas-link-btn.canvas-linked {
   background: #2563eb;
   color: #fff;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+}
+.canvas-link-btn.canvas-linked:hover {
+  background: #1d4ed8;
 }
 
 .chat-list { display: flex; flex-direction: column; gap: 12px; }
