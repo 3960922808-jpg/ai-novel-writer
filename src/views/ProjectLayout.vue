@@ -69,7 +69,6 @@ const navItems = [
   { name: 'dashboard', label: '仪表盘', icon: DataAnalysis },
   { name: 'chapters', label: '章节列表', icon: Document },
   { name: 'editor', label: '写作', icon: Edit },
-  { name: 'people', label: '人物库', icon: User },
   { name: 'locations', label: '地点', icon: Location },
   { name: 'lore', label: '世界观', icon: Collection },
   { name: 'timeline', label: '时间线', icon: Timer },

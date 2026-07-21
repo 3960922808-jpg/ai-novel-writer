@@ -1,13 +1,13 @@
 // 封装所有 IPC store 调用
 import type {
-  Project, Chapter, Character, Location, LoreEntry,
+  Project, Chapter, Location, LoreEntry,
   TimelineEvent, CanvasNode, Prompt, WritingGoal,
   TruthFile, CritiqueRecord, ChapterVersion, AppSettings,
   Skill, StyleProfile
 } from '@/types'
 
 type Collection =
-  | 'chapters' | 'characters' | 'locations' | 'lore'
+  | 'chapters' | 'locations' | 'lore'
   | 'timeline' | 'canvas' | 'prompts' | 'goals'
   | 'truths' | 'critiques' | 'versions'
   | 'skills' | 'styleProfiles'
@@ -58,12 +58,6 @@ export const Chapters = {
   list: (pid: string) => list<Chapter>('chapters', pid),
   save: (c: Partial<Chapter> & { projectId: string; title: string }) => save('chapters', c),
   remove: (id: string) => remove('chapters', id)
-}
-
-export const Characters = {
-  list: (pid: string) => list<Character>('characters', pid),
-  save: (c: Partial<Character> & { projectId: string; name: string }) => save('characters', c),
-  remove: (id: string) => remove('characters', id)
 }
 
 export const Locations = {

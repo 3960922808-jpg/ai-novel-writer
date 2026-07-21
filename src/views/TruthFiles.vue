@@ -235,13 +235,10 @@ async function saveEdit() {
   }
 }
 
-async function buildContext(): Promise<{ chapterSummaries: string; charInfo: string }> {
-  if (!project.value) return { chapterSummaries: '', charInfo: '' }
+async function buildContext(): Promise<{ chapterSummaries: string }> {
+  if (!project.value) return { chapterSummaries: '' }
   const pid = project.value.id
-  const [chs, chars] = await Promise.all([
-    db.Chapters.list(pid),
-    db.Characters.list(pid)
-  ])
+  const chs = await db.Chapters.list(pid)
   const sorted = [...chs].sort((a, b) => a.order - b.order)
   const chapterSummaries = sorted.map(c => {
     const summary = c.summary?.trim()
@@ -250,24 +247,11 @@ async function buildContext(): Promise<{ chapterSummaries: string; charInfo: str
     const excerpt = plain.length > 200 ? plain.slice(0, 200) + '…' : plain
     return `第${c.order}章《${c.title}》：${excerpt || '(无内容)'}`
   }).join('\n')
-  const charInfo = chars.map(c => {
-    const parts = [
-      `姓名：${c.name}（${c.role}）`,
-      c.aliases?.length ? `别名：${c.aliases.join('、')}` : '',
-      c.appearance ? `外貌：${c.appearance}` : '',
-      c.personality ? `性格：${c.personality}` : '',
-      c.background ? `背景：${c.background}` : '',
-      c.abilities ? `能力：${c.abilities}` : '',
-      c.goals ? `目标：${c.goals}` : '',
-      c.arc ? `弧线：${c.arc}` : ''
-    ].filter(Boolean)
-    return `- ${parts.join('；')}`
-  }).join('\n')
-  return { chapterSummaries, charInfo }
+  return { chapterSummaries }
 }
 
-function buildPrompt(file: TruthFile, ctx: { chapterSummaries: string; charInfo: string }): string {
-  return `你是小说创作助手。基于以下章节内容和角色设定，重新整理「${file.title}」文件。要求：客观、简洁、条目化（用 markdown 列表）。直接输出文件内容，不要解释。\n\n章节摘要：\n${ctx.chapterSummaries || '(暂无章节)'}\n\n角色档案：\n${ctx.charInfo || '(暂无角色)'}\n\n现有内容（参考）：\n${file.content || '(空)'}`
+function buildPrompt(file: TruthFile, ctx: { chapterSummaries: string }): string {
+  return `你是小说创作助手。基于以下章节内容，重新整理「${file.title}」文件。要求：客观、简洁、条目化（用 markdown 列表）。直接输出文件内容，不要解释。\n\n章节摘要：\n${ctx.chapterSummaries || '(暂无章节)'}\n\n现有内容（参考）：\n${file.content || '(空)'}`
 }
 
 function pickModel(): string {

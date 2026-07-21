@@ -124,13 +124,14 @@
             <button class="node-del" title="删除" @click.stop="remove(node)">
               <el-icon><Close /></el-icon>
             </button>
-            <!-- 圆形节点内容：编号 + 类型首字 -->
+            <!-- 圆形节点内容：类型首字（统一风格，不显示数字序号） -->
             <div class="circle-inner">
-              <span v-if="isWorkflowType(node.type) && workflowIndex(node) >= 0" class="circle-order">{{ workflowIndex(node) + 1 }}</span>
-              <span v-else class="circle-icon-text">{{ typeLabel(node.type).slice(0, 1) }}</span>
+              <span class="circle-icon-text">{{ typeLabel(node.type).slice(0, 1) }}</span>
             </div>
             <!-- 节点标题（圆形下方） -->
             <div class="circle-title">{{ node.title || typeLabel(node.type) }}</div>
+            <!-- 节点类型标签（圆形上方） -->
+            <div class="circle-type-label">{{ typeLabel(node.type) }}</div>
           </div>
         </div>
         <div v-if="nodes.length === 0" class="canvas-empty">
@@ -1076,27 +1077,30 @@ async function copyGenerated() {
 }
 .node-circle {
   position: absolute;
-  border: 3px solid;
+  border: 2px solid;
   border-radius: 50%;
-  box-shadow: var(--shadow);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.5);
   cursor: move;
   user-select: none;
   z-index: 1;
-  transition: transform 0.15s, box-shadow 0.15s;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   overflow: visible;
+  backdrop-filter: blur(2px);
 }
 .node-circle:hover {
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18), 0 0 0 4px rgba(255, 255, 255, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.6);
   z-index: 2;
-  transform: scale(1.08);
+  transform: scale(1.1) translateY(-2px);
+  border-width: 3px;
 }
 .node-circle:active {
   cursor: grabbing;
-  transform: scale(1.04);
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
 }
 /* 连线模式下仍可拖动节点 */
 .node-circle.connect-mode {
@@ -1104,9 +1108,9 @@ async function copyGenerated() {
 }
 /* 连线模式下悬停目标高亮 */
 .node-circle.drop-target {
-  box-shadow: 0 0 0 4px #ef4444, 0 6px 18px rgba(239, 68, 68, 0.35);
+  box-shadow: 0 0 0 4px #ef4444, 0 8px 24px rgba(239, 68, 68, 0.4);
   border-color: #ef4444 !important;
-  transform: scale(1.12);
+  transform: scale(1.14);
 }
 /* 圆形内部内容 */
 .circle-inner {
@@ -1116,39 +1120,59 @@ async function copyGenerated() {
   width: 100%;
   height: 100%;
   pointer-events: none;
-}
-.circle-order {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--text);
-  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.6);
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 70%);
 }
 .circle-icon-text {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-2);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.7);
+  letter-spacing: 0.5px;
 }
 /* 圆形下方标题 */
 .circle-title {
   position: absolute;
-  bottom: -22px;
+  bottom: -26px;
   left: 50%;
   transform: translateX(-50%);
   white-space: nowrap;
   font-size: 12px;
-  color: var(--text-2);
+  font-weight: 500;
+  color: var(--text);
   background: var(--panel);
-  padding: 2px 8px;
-  border-radius: 4px;
+  padding: 3px 10px;
+  border-radius: 10px;
   border: 1px solid var(--border);
-  max-width: 140px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  max-width: 150px;
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
 }
+/* 圆形上方类型标签 */
+.circle-type-label {
+  position: absolute;
+  top: -24px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  padding: 2px 9px;
+  border-radius: 8px;
+  background: var(--text-2);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  pointer-events: none;
+  letter-spacing: 0.3px;
+}
 .node-circle.is-workflow {
-  border-width: 4px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  border-width: 3px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+.node-circle.is-workflow:hover {
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22), 0 0 0 4px rgba(255, 255, 255, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 /* 红点 */
 .node-dot {
@@ -1234,44 +1258,57 @@ async function copyGenerated() {
 
 /* ===== 工作流概览条 ===== */
 .workflow-overview {
-  padding: 12px 16px;
+  padding: 14px 18px;
   margin-bottom: 16px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.04), rgba(168, 85, 247, 0.04));
 }
 .workflow-overview-title {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: var(--text-2);
-  margin-bottom: 10px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 12px;
+}
+.workflow-overview-title .text-faint {
+  font-weight: 400;
+  margin-left: 4px;
 }
 .workflow-steps {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
 }
 .workflow-step {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
+  gap: 8px;
+  padding: 8px 14px;
   background: var(--panel);
   border: 2px solid;
-  border-radius: var(--radius);
+  border-radius: 14px;
   font-size: 13px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.workflow-step:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 .workflow-step .step-num {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   background: var(--primary);
   color: white;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
 }
 .workflow-step .step-title {
   color: var(--text);
@@ -1279,50 +1316,7 @@ async function copyGenerated() {
 }
 .step-arrow {
   color: var(--text-3);
-}
-
-/* ===== 节点 header（顺序号 + 类型标签） ===== */
-.node-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
-}
-.node-order {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 22px;
-  height: 18px;
-  padding: 0 4px;
-  border-radius: 9px;
-  background: var(--primary);
-  color: white;
-  font-size: 11px;
-  font-weight: 600;
-}
-.node.is-workflow {
-  border-width: 3px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-}
-.node-ai-prompt {
-  display: flex;
-  align-items: flex-start;
-  gap: 4px;
-  margin-top: 4px;
-  padding: 4px 6px;
-  background: rgba(99, 102, 241, 0.08);
-  border-left: 2px solid var(--primary);
-  border-radius: 3px;
-  font-size: 11px;
-  color: var(--text-2);
-  line-height: 1.4;
-  word-break: break-all;
-}
-.node-ai-prompt .el-icon {
-  flex-shrink: 0;
-  margin-top: 1px;
-  color: var(--primary);
+  font-size: 16px;
 }
 
 /* ===== AI 生成对话框 ===== */

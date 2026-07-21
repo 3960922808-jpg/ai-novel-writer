@@ -173,7 +173,7 @@
         <div class="flex items-center justify-between danger-row">
           <div>
             <div class="danger-name">删除项目</div>
-            <div class="text-muted text-sm">删除后无法恢复，所有章节、角色、设定将一并清除</div>
+            <div class="text-muted text-sm">删除后无法恢复，所有章节、设定将一并清除</div>
           </div>
           <el-button type="danger" :icon="Delete" @click="confirmDelete">删除项目</el-button>
         </div>
@@ -322,7 +322,7 @@ function confirmDelete() {
   const p = projectStore.current
   if (!p) return
   ElMessageBox.confirm(
-    `确定删除《${p.title}》？所有章节、角色、设定将一并删除，且无法恢复。`,
+    `确定删除《${p.title}》？所有章节、设定将一并删除，且无法恢复。`,
     '删除确认',
     {
       type: 'warning',

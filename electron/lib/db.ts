@@ -6,7 +6,6 @@ import fs from 'node:fs'
 export interface DBShape {
   projects: any[]
   chapters: any[]
-  characters: any[]
   locations: any[]
   lore: any[]
   timeline: any[]
@@ -24,7 +23,6 @@ export interface DBShape {
 export const defaultData: DBShape = {
   projects: [],
   chapters: [],
-  characters: [],
   locations: [],
   lore: [],
   timeline: [],
@@ -53,16 +51,11 @@ export async function initDB() {
       ;(db.data as any)[k] = []
     }
   }
-  if (!db.data.settings) db.data.settings = null
-  // 一次性数据迁移：v1.3.5 清空所有角色数据（用户要求重建角色库）
-  // 通过 settings._migratedCharWipe 标记确保只执行一次
-  // 注意：settings 为 null 的情况交给 store:settings:get 处理（它有完整默认值）
-  if (db.data.settings && !(db.data.settings as any)._migratedCharWipe) {
-    db.data.characters = []
-    ;(db.data.settings as any)._migratedCharWipe = true
-    await db.write()
-    console.log('[db] 已清空角色库（v1.3.5 一次性迁移）')
+  // v1.3.8：彻底移除 characters 集合（人物库已下线）
+  if (Array.isArray((db.data as any).characters)) {
+    delete (db.data as any).characters
   }
+  if (!db.data.settings) db.data.settings = null
   await db.write()
   // 初始化内置提示词
   await seedBuiltInPrompts()

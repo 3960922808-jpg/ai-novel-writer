@@ -119,7 +119,7 @@
             v-model="editing.userPrompt"
             type="textarea"
             :rows="6"
-            placeholder="支持 {{变量}}，例如：请根据以下信息写战斗场景：&#10;角色：{{characters}}&#10;环境：{{env}}"
+            placeholder="支持 {{变量}}，例如：请根据以下信息写场景：&#10;环境：{{env}}&#10;冲突：{{cause}}"
           />
           <div class="text-faint text-xs" style="margin-top: 4px">
             自动识别的变量：

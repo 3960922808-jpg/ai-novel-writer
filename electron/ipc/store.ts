@@ -3,7 +3,7 @@ import { getDB } from '../lib/db'
 import { v4 as uuidv4 } from 'uuid'
 
 const COLLECTIONS = [
-  'chapters', 'characters', 'locations', 'lore',
+  'chapters', 'locations', 'lore',
   'timeline', 'canvas', 'prompts', 'goals',
   'truths', 'critiques', 'versions',
   'skills', 'styleProfiles'
@@ -136,13 +136,10 @@ export function registerStoreIPC() {
         searchApiKey: '',
         autoUpdateCheck: true,
         lastCommitSha: '',
-        zoomLevel: 100,
-        _migratedCharWipe: true  // v1.3.5 标记：首次创建默认 settings 时视作已迁移
+        zoomLevel: 100
       }
-      // 同时清空旧角色库（用户首次启动新版本）
-      db.data.characters = []
       await db.write()
-      console.log('[settings] 首次创建默认 settings，已清空角色库')
+      console.log('[settings] 首次创建默认 settings')
     }
     // 老数据兼容：补齐新字段
     if (db.data.settings && !('searchProvider' in db.data.settings)) {

@@ -40,10 +40,6 @@
               <el-icon><Document /></el-icon>
               {{ chapterName(ev.chapterId) }}
             </span>
-            <span v-for="cid in ev.characterIds" :key="cid" class="tl-chip">
-              <el-icon><User /></el-icon>
-              {{ characterName(cid) }}
-            </span>
             <span class="tl-order text-faint text-xs">#{{ ev.order }}</span>
           </div>
           <div class="tl-actions" @click.stop>
@@ -68,11 +64,6 @@
         <el-form-item label="关联章节">
           <el-select v-model="form.chapterId" clearable placeholder="选择章节" style="width: 100%">
             <el-option v-for="c in projectStore.chapters" :key="c.id" :label="c.title" :value="c.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="关联角色">
-          <el-select v-model="form.characterIds" multiple clearable placeholder="选择角色" style="width: 100%">
-            <el-option v-for="ch in projectStore.characters" :key="ch.id" :label="ch.name" :value="ch.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="重要程度">
@@ -153,10 +144,6 @@ async function load() {
 function chapterName(id?: ID) {
   if (!id) return ''
   return projectStore.chapters.find(c => c.id === id)?.title || ''
-}
-
-function characterName(id: ID) {
-  return projectStore.characters.find(c => c.id === id)?.name || '未知角色'
 }
 
 function importanceType(i: TimelineEvent['importance']): any {

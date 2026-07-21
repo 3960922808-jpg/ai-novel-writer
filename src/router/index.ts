@@ -27,7 +27,6 @@ const routes: RouteRecordRaw[] = [
       { path: 'dashboard', name: 'dashboard', component: () => import('@/views/Dashboard.vue'), meta: { title: '仪表盘' } },
       { path: 'chapters', name: 'chapters', component: () => import('@/views/ChapterList.vue'), meta: { title: '章节列表' } },
       { path: 'chapters/:chapterId', name: 'editor', component: () => import('@/views/Editor.vue'), meta: { title: '写作' } },
-      { path: 'people', name: 'people', component: () => import('@/views/People.vue'), meta: { title: '人物库' } },
       { path: 'locations', name: 'locations', component: () => import('@/views/Locations.vue'), meta: { title: '地点' } },
       { path: 'lore', name: 'lore', component: () => import('@/views/Lore.vue'), meta: { title: '世界观设定' } },
       { path: 'timeline', name: 'timeline', component: () => import('@/views/Timeline.vue'), meta: { title: '时间线' } },

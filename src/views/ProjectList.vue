@@ -3,7 +3,7 @@
     <header class="home-header">
       <div>
         <h1 class="page-title">我的书架</h1>
-        <p class="text-muted">基于 OpenWrite 理念的 AI 长篇小说创作工作台</p>
+        <p class="text-muted">沉浸式长篇小说创作工作台</p>
       </div>
       <div class="flex gap-2">
         <el-button :icon="themeIcon" circle @click="toggleTheme" :title="themeTip" />
@@ -312,7 +312,7 @@ async function applyTemplate(pid: string, template: string, genre: string, title
 }
 
 function confirmDelete(p: Project) {
-  ElMessageBox.confirm(`确定删除《${p.title}》？所有章节、角色、设定将一并删除，且无法恢复。`, '删除确认', {
+  ElMessageBox.confirm(`确定删除《${p.title}》？所有章节、设定将一并删除，且无法恢复。`, '删除确认', {
     type: 'warning',
     confirmButtonText: '删除',
     cancelButtonText: '取消'

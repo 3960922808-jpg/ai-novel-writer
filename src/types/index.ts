@@ -44,34 +44,6 @@ export interface Chapter {
   updatedAt: number
 }
 
-/** 角色 */
-export interface Character {
-  id: ID
-  projectId: ID
-  name: string
-  aliases: string[] // 别名
-  role: '主角' | '配角' | '反派' | '龙套' | '其他'
-  age: string
-  gender: string
-  appearance: string
-  personality: string
-  background: string
-  abilities: string
-  goals: string // 角色目标
-  arc: string // 角色弧线
-  relationships: CharacterRelation[]
-  tags: string[]
-  createdAt: number
-  updatedAt: number
-}
-
-export interface CharacterRelation {
-  targetId: ID
-  targetName: string
-  type: string // 朋友/敌人/恋人/师徒/...
-  description: string
-}
-
 /** 地点 */
 export interface Location {
   id: ID

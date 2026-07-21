@@ -1,12 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Project, Chapter, Character, Location, LoreEntry } from '@/types'
+import type { Project, Chapter, Location, LoreEntry } from '@/types'
 import * as db from '@/services/db'
 
 export const useProjectStore = defineStore('project', () => {
   const current = ref<Project | null>(null)
   const chapters = ref<Chapter[]>([])
-  const characters = ref<Character[]>([])
   const locations = ref<Location[]>([])
   const lore = ref<LoreEntry[]>([])
 
@@ -26,14 +25,12 @@ export const useProjectStore = defineStore('project', () => {
   async function reloadAll() {
     if (!current.value) return
     const pid = current.value.id
-    const [chs, chs2, locs, loreList] = await Promise.all([
+    const [chs, locs, loreList] = await Promise.all([
       db.Chapters.list(pid),
-      db.Characters.list(pid),
       db.Locations.list(pid),
       db.Lore.list(pid)
     ])
     chapters.value = chs.sort((a, b) => a.order - b.order)
-    characters.value = chs2
     locations.value = locs
     lore.value = loreList
   }
@@ -53,13 +50,12 @@ export const useProjectStore = defineStore('project', () => {
   function clear() {
     current.value = null
     chapters.value = []
-    characters.value = []
     locations.value = []
     lore.value = []
   }
 
   return {
-    current, chapters, characters, locations, lore,
+    current, chapters, locations, lore,
     totalWords, chapterCount,
     loadProject, reloadAll, reloadChapters, saveProject, clear
   }

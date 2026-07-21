@@ -271,31 +271,15 @@ function plainText(content: string): string {
 }
 
 async function loadTruthAndCharacters() {
-  if (!project.value) return { truth: '', characters: '' }
+  if (!project.value) return { truth: '' }
   const pid = project.value.id
   try {
-    const [truths, chars] = await Promise.all([
-      db.Truths.list(pid),
-      db.Characters.list(pid)
-    ])
+    const truths = await db.Truths.list(pid)
     const truth = truths.map(t => `# ${t.title}\n${t.content || '(空)'}`).join('\n\n')
-    const characters = chars.map(c => {
-      const parts = [
-        `姓名：${c.name}（${c.role}）`,
-        c.aliases?.length ? `别名：${c.aliases.join('、')}` : '',
-        c.appearance ? `外貌：${c.appearance}` : '',
-        c.personality ? `性格：${c.personality}` : '',
-        c.background ? `背景：${c.background}` : '',
-        c.abilities ? `能力：${c.abilities}` : '',
-        c.goals ? `目标：${c.goals}` : '',
-        c.arc ? `弧线：${c.arc}` : ''
-      ].filter(Boolean)
-      return `- ${parts.join('；')}`
-    }).join('\n')
-    return { truth, characters }
+    return { truth }
   } catch (e: any) {
-    ElMessage.error(`加载真相/角色数据失败：${e?.message || e}`)
-    return { truth: '', characters: '' }
+    ElMessage.error(`加载真相数据失败：${e?.message || e}`)
+    return { truth: '' }
   }
 }
 
@@ -354,7 +338,7 @@ async function runCritique() {
     ElMessage.warning('该章节内容为空')
     return
   }
-  const { truth, characters } = await loadTruthAndCharacters()
+  const { truth } = await loadTruthAndCharacters()
 
   running.value = true
   dialogVisible.value = false
@@ -392,7 +376,7 @@ async function runCritique() {
           const userMsg = ai.renderTemplate(tpl.content, {
             content,
             truth,
-            characters,
+            characters: '',
             chapterTitle: chapter.title
           })
           const text = await ai.chat(ai.buildRequest({

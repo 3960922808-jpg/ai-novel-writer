@@ -29,8 +29,8 @@
         <div class="text-faint text-xs">已完成 {{ completedChapters }} 章</div>
       </div>
       <div class="stat-card card">
-        <div class="stat-label">人物数</div>
-        <div class="stat-value">{{ projectStore.characters.length }}</div>
+        <div class="stat-label">设定数</div>
+        <div class="stat-value">{{ projectStore.lore.length }}</div>
         <div class="text-faint text-xs">{{ projectStore.locations.length }} 个地点</div>
       </div>
       <div class="stat-card card">
@@ -69,21 +69,21 @@
         </div>
       </div>
 
-      <!-- 最近人物 -->
+      <!-- 最近设定 -->
       <div class="card" style="padding: 16px">
         <div class="flex justify-between items-center" style="margin-bottom: 12px">
-          <h3 style="margin:0; font-size:15px">主要人物</h3>
-          <el-button text size="small" @click="$router.push({ name: 'people' })">管理 →</el-button>
+          <h3 style="margin:0; font-size:15px">最近设定</h3>
+          <el-button text size="small" @click="$router.push({ name: 'lore' })">管理 →</el-button>
         </div>
-        <div v-if="projectStore.characters.length === 0" class="empty" style="padding: 24px">
-          <p class="text-faint">还没有人物</p>
+        <div v-if="projectStore.lore.length === 0" class="empty" style="padding: 24px">
+          <p class="text-faint">还没有设定</p>
         </div>
         <div v-else class="char-grid">
-          <div v-for="c in projectStore.characters.slice(0, 6)" :key="c.id" class="char-item">
-            <div class="avatar" :style="{ background: avatarColor(c.name) }">{{ c.name[0] }}</div>
+          <div v-for="l in projectStore.lore.slice(0, 6)" :key="l.id" class="char-item">
+            <div class="avatar" :style="{ background: avatarColor(l.title) }">{{ (l.title || '?')[0] }}</div>
             <div>
-              <div class="char-name">{{ c.name }}</div>
-              <div class="text-faint text-xs">{{ c.role }}</div>
+              <div class="char-name">{{ l.title }}</div>
+              <div class="text-faint text-xs">{{ l.category }}</div>
             </div>
           </div>
         </div>

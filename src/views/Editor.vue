@@ -115,10 +115,6 @@
                   <el-icon class="tree-icon"><Collection /></el-icon>
                   <span class="tree-label">设定</span>
                 </div>
-                <div class="tree-row leaf-row" @click="$router.push({ name: 'people' })">
-                  <el-icon class="tree-icon"><User /></el-icon>
-                  <span class="tree-label">人物</span>
-                </div>
                 <div class="tree-row leaf-row" @click="$router.push({ name: 'lore' })">
                   <el-icon class="tree-icon"><Files /></el-icon>
                   <span class="tree-label">知识库</span>
@@ -134,9 +130,6 @@
           <div class="analysis-list">
             <button class="analysis-item" @click="runAnalysis('plot')">
               <el-icon><DataAnalysis /></el-icon><span>剧情分析</span>
-            </button>
-            <button class="analysis-item" @click="runAnalysis('characters')">
-              <el-icon><Connection /></el-icon><span>人物关系</span>
             </button>
             <button class="analysis-item" @click="runAnalysis('holes')">
               <el-icon><Warning /></el-icon><span>漏洞分析</span>
@@ -238,7 +231,7 @@
               <el-icon><ChatDotRound /></el-icon>
             </div>
             <p class="chat-empty-title">对话区域</p>
-            <p class="chat-empty-tip">输入任何你对小说的疑问，比如"人物设定如何修改"，"文章建议"。</p>
+            <p class="chat-empty-tip">输入任何你对小说的疑问，比如"剧情走向如何调整"，"文章建议"。</p>
             <p class="chat-empty-tip">提示：输入 <code class="hint-code">/</code> 可触发技能，输入 <code class="hint-code">@</code> 可关联章节内容</p>
             <button class="canvas-link-btn" :class="{ 'canvas-linked': canvasLinked }" @click="linkCanvas">
               <el-icon><Connection /></el-icon>
@@ -354,7 +347,7 @@
             ref="inputRef"
             v-model="userInput"
             class="chat-input"
-            placeholder="请输入指令，输入 @ 关联人物/地点/设定/章节，输入 / 触发技能"
+            placeholder="请输入指令，输入 @ 关联地点/设定/章节，输入 / 触发技能"
             rows="4"
             @input="onInput"
             @keydown="onKeydown"
@@ -708,9 +701,8 @@ function buildContext(): string {
   const recentSummaries = prevChapters.slice(-3).map(c => `第${c.order}章《${c.title}》：${c.summary || '（无摘要）'}`).join('\n')
   const currentText = editor.value?.getText() || ''
   const tail = currentText.slice(-1500)
-  const chars = projectStore.characters.slice(0, 10).map(c => `${c.name}(${c.role})：${c.personality?.slice(0, 50) || ''}`).join('；')
   const lore = projectStore.lore.slice(0, 8).map(l => `${l.category}/${l.title}：${l.content?.slice(0, 60) || ''}`).join('；')
-  return `【作品信息】\n类型：${project.value.genre}\n标题：${project.value.title}\n简介：${project.value.description}\n\n【前情摘要】\n${recentSummaries}\n\n【人物】${chars}\n\n【设定】${lore}\n\n【当前章节】\n第${chapter.value.order}章《${chapter.value.title}》\n${tail}`
+  return `【作品信息】\n类型：${project.value.genre}\n标题：${project.value.title}\n简介：${project.value.description}\n\n【前情摘要】\n${recentSummaries}\n\n【设定】${lore}\n\n【当前章节】\n第${chapter.value.order}章《${chapter.value.title}》\n${tail}`
 }
 
 // ===== AI 对话面板 =====
@@ -800,7 +792,7 @@ const slashKeyword = ref('')
 
 // @ 关联菜单
 interface AtMatch {
-  type: string       // 人物/地点/设定/章节
+  type: string       // 地点/设定/章节
   label: string      // 显示名
   preview: string    // 描述前 60 字
   content: string    // 完整内容（关联时塞入）
@@ -820,7 +812,7 @@ const filteredSkills = computed(() => {
 })
 
 /**
- * 解析输入框中的 @ 关键词，匹配项目内人物/地点/设定/章节
+ * 解析输入框中的 @ 关键词，匹配项目内地点/设定/章节
  * 触发条件：光标前最近一个 @ 后没有空格，且 @ 后字符长度 > 0
  */
 function detectAtKeyword(text: string, caret: number): string {
@@ -841,17 +833,6 @@ function buildAtMatches(keyword: string): AtMatch[] {
   const matches: AtMatch[] = []
   const filter = (s: string) => !kw || s.toLowerCase().includes(kw)
 
-  // 人物
-  for (const c of projectStore.characters) {
-    if (!filter(c.name)) continue
-    matches.push({
-      type: '人物',
-      label: c.name,
-      preview: `${c.role} · ${(c.personality || '无描述').slice(0, 50)}`,
-      content: `【人物：${c.name}】\n身份：${c.role}\n性别：${c.gender || '未设定'}\n年龄：${c.age || '未设定'}\n外貌：${c.appearance || '无'}\n性格：${c.personality || '无'}\n背景：${c.background || '无'}\n能力：${c.abilities || '无'}\n目标：${c.goals || '无'}\n弧线：${c.arc || '无'}`,
-      icon: User
-    })
-  }
   // 地点
   for (const l of projectStore.locations) {
     if (!filter(l.name)) continue
@@ -1028,7 +1009,7 @@ async function sendChat() {
     words: '800',
     instruction: userMsg,
     count: '10',
-    characters: projectStore.characters.map(c => c.name).join('、'),
+    characters: '',
     scene: userMsg,
     emotion: '',
     imitationGuide: project.value?.settings.styleSample || '',
@@ -1430,11 +1411,10 @@ function runTopAction(action: string) {
 }
 
 // ===== AI 分析 =====
-function runAnalysis(type: 'plot' | 'characters' | 'holes') {
+function runAnalysis(type: 'plot' | 'holes') {
   const map: Record<string, string> = {
     plot: '请对当前章节做剧情分析：总结主要事件、情节推进、冲突点、悬念设置，并给出节奏评价',
-    characters: '请分析当前章节中的人物关系：出场角色、彼此关系、性格表现是否符合设定、有无 OOC',
-    holes: '请检查当前章节是否存在逻辑漏洞、设定矛盾、伏笔断裂、时间线错误、信息泄露（角色提到不该知道的事）'
+    holes: '请检查当前章节是否存在逻辑漏洞、设定矛盾、伏笔断裂、时间线错误、信息泄露'
   }
   userInput.value = map[type]
   sendChat()
