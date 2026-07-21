@@ -1,6 +1,6 @@
 {
   "name": "trmwrite",
-  "version": "1.3.3",
+  "version": "1.3.4",
   "description": "TrmWrite - Windows 桌面版（AI 写小说创作助手）",
   "author": "TrmWrite",
   "main": "dist-electron/main.js",

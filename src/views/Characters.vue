@@ -237,12 +237,15 @@ const aiGenerating = ref(false)
 const aiForm = ref({ setup: '', count: 3, model: '' })
 
 const filtered = computed(() => {
-  const kw = keyword.value.trim().toLowerCase()
-  if (!kw) return projectStore.characters
-  return projectStore.characters.filter(c =>
-    c.name.toLowerCase().includes(kw) ||
-    (c.aliases || []).some(a => a.toLowerCase().includes(kw)) ||
-    (c.tags || []).some(t => t.toLowerCase().includes(kw))
+  // 全套防御：避免 db 脏数据（null/undefined 项或字段缺失）导致渲染崩溃白屏
+  const list = Array.isArray(projectStore.characters) ? projectStore.characters : []
+  const safe = list.filter(c => c && c.id)
+  const kw = (keyword.value || '').trim().toLowerCase()
+  if (!kw) return safe
+  return safe.filter(c =>
+    ((c.name || '') + '').toLowerCase().includes(kw) ||
+    (Array.isArray(c.aliases) ? c.aliases : []).some(a => ((a || '') + '').toLowerCase().includes(kw)) ||
+    (Array.isArray(c.tags) ? c.tags : []).some(t => ((t || '') + '').toLowerCase().includes(kw))
   )
 })
 
@@ -253,19 +256,23 @@ watch(models, (ms) => {
 }, { immediate: true })
 
 watch(() => projectStore.characters, () => {
-  if (selectedId.value && !projectStore.characters.find(c => c.id === selectedId.value)) {
+  const list = Array.isArray(projectStore.characters) ? projectStore.characters : []
+  if (selectedId.value && !list.find(c => c && c.id === selectedId.value)) {
     selectedId.value = ''
     current.value = null
   }
-})
+}, { immediate: true })
 
 function selectChar(c: Character) {
+  if (!c) return
   selectedId.value = c.id
+  // 全字段兜底：脏数据可能某字段为 undefined / 不是数组
   current.value = JSON.parse(JSON.stringify({
     ...c,
-    aliases: c.aliases || [],
-    tags: c.tags || [],
-    relationships: c.relationships || []
+    name: c.name || '',
+    aliases: Array.isArray(c.aliases) ? c.aliases : [],
+    tags: Array.isArray(c.tags) ? c.tags : [],
+    relationships: Array.isArray(c.relationships) ? c.relationships : []
   }))
 }
 
