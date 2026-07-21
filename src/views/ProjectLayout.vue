@@ -52,7 +52,7 @@ import {
   EditPen, DataAnalysis, Document, Edit, User,
   Location, Collection, Timer, Connection,
   MagicStick, Trophy, ChatLineSquare, Files, Download, Setting, Fold, Expand,
-  Search, CopyDocument, Reading
+  CopyDocument, Reading
 } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { ElMessage } from 'element-plus'
@@ -75,7 +75,6 @@ const navItems = [
   { name: 'canvas', label: '故事画布', icon: Connection },
   { name: 'skills', label: '技能库', icon: MagicStick },
   { name: 'distill', label: '蒸馏文风', icon: CopyDocument },
-  { name: 'search', label: '联网搜索', icon: Search },
   { name: 'prompts', label: '提示词库', icon: EditPen },
   { name: 'goals', label: '写作目标', icon: Trophy },
   { name: 'critics', label: 'AI 评审', icon: ChatLineSquare },

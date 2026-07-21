@@ -55,6 +55,46 @@ export async function initDB() {
   if (Array.isArray((db.data as any).characters)) {
     delete (db.data as any).characters
   }
+  // v1.3.9：刷新 builtin-critic-continuity 提示词内容（移除已废弃的 {{characters}}）
+  if (Array.isArray(db.data.prompts)) {
+    const continuity = db.data.prompts.find((p: any) => p.id === 'builtin-critic-continuity')
+    if (continuity && continuity.content && continuity.content.includes('{{characters}}')) {
+      continuity.content = '你是一位连续性审查员。对照以下世界状态，检查章节是否存在：设定矛盾、伏笔断裂、时间线错误、信息泄露（提到不该知道的事）等问题。输出 JSON：{"findings":[{"severity":"high","issue":"...","suggestion":"..."}],"summary":"..."}\n\n世界状态：\n{{truth}}\n\n待审章节：\n{{content}}'
+      continuity.variables = ['truth', 'content']
+      continuity.updatedAt = Date.now()
+    }
+    // 兜底补齐缺失的内置评审提示词（老用户数据可能没有）
+    const now = Date.now()
+    const builtinCritics: any[] = [
+      {
+        id: 'builtin-critic-voice',
+        projectId: 'global',
+        category: '评审',
+        title: '文风评审员',
+        content: '你是一位严格的文学编辑，专司文风审查。请审查以下文本，找出：套话/陈词滥调、AI 味重的句式、词汇疲劳、节奏单调、过度修饰等问题。对每个问题给出严重程度（high/medium/low）、具体位置、修改建议。最后给一段整体评价。输出 JSON：{"findings":[{"severity":"high","issue":"...","suggestion":"..."}],"summary":"..."}\n\n{{content}}',
+        variables: ['content'],
+        isBuiltIn: true,
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: 'builtin-critic-continuity',
+        projectId: 'global',
+        category: '评审',
+        title: '连续性评审员',
+        content: '你是一位连续性审查员。对照以下世界状态，检查章节是否存在：设定矛盾、伏笔断裂、时间线错误、信息泄露（提到不该知道的事）等问题。输出 JSON：{"findings":[{"severity":"high","issue":"...","suggestion":"..."}],"summary":"..."}\n\n世界状态：\n{{truth}}\n\n待审章节：\n{{content}}',
+        variables: ['truth', 'content'],
+        isBuiltIn: true,
+        createdAt: now,
+        updatedAt: now
+      }
+    ]
+    for (const b of builtinCritics) {
+      if (!db.data.prompts.find((p: any) => p.id === b.id)) {
+        db.data.prompts.push(b)
+      }
+    }
+  }
   if (!db.data.settings) db.data.settings = null
   await db.write()
   // 初始化内置提示词
@@ -177,8 +217,8 @@ async function seedBuiltInPrompts() {
         projectId: 'global',
         category: '评审',
         title: '连续性评审员',
-        content: '你是一位连续性审查员。对照以下世界状态与角色档案，检查章节是否存在：角色 OOC、设定矛盾、伏笔断裂、时间线错误、信息泄露（提到不该知道的事）等问题。输出 JSON：{"findings":[{"severity":"high","issue":"...","suggestion":"..."}],"summary":"..."}\n\n世界状态：\n{{truth}}\n\n角色档案：\n{{characters}}\n\n待审章节：\n{{content}}',
-        variables: ['truth', 'characters', 'content'],
+        content: '你是一位连续性审查员。对照以下世界状态，检查章节是否存在：设定矛盾、伏笔断裂、时间线错误、信息泄露（提到不该知道的事）等问题。输出 JSON：{"findings":[{"severity":"high","issue":"...","suggestion":"..."}],"summary":"..."}\n\n世界状态：\n{{truth}}\n\n待审章节：\n{{content}}',
+        variables: ['truth', 'content'],
         isBuiltIn: true,
         createdAt: now,
         updatedAt: now

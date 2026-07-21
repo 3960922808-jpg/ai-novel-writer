@@ -283,6 +283,19 @@ async function loadTruthAndCharacters() {
   }
 }
 
+// 兜底内置评审提示词（防止老用户 db 中缺失内置 prompt 导致评审失败）
+const FALLBACK_PROMPTS: Record<string, string> = {
+  'builtin-critic-voice': '你是一位严格的文学编辑，专司文风审查。请审查以下文本，找出：套话/陈词滥调、AI 味重的句式、词汇疲劳、节奏单调、过度修饰等问题。对每个问题给出严重程度（high/medium/low）、具体位置、修改建议。最后给一段整体评价。输出 JSON：{"findings":[{"severity":"high","issue":"...","suggestion":"..."}],"summary":"..."}\n\n{{content}}',
+  'builtin-critic-continuity': '你是一位连续性审查员。对照以下世界状态，检查章节是否存在：设定矛盾、伏笔断裂、时间线错误、信息泄露（提到不该知道的事）等问题。输出 JSON：{"findings":[{"severity":"high","issue":"...","suggestion":"..."}],"summary":"..."}\n\n世界状态：\n{{truth}}\n\n待审章节：\n{{content}}'
+}
+
+// 清理已废弃的 {{characters}} 占位符（v1.3.8 移除人物库后老 prompt 仍可能引用）
+function sanitizeTemplate(tpl: string): string {
+  return (tpl || '')
+    .replace(/\n\n角色档案：\s*\{\{characters\}\}/g, '')
+    .replace(/\{\{characters\}\}/g, '（无）')
+}
+
 function parseCritiqueJSON(text: string): { summary: string; findings: CritiqueRecord['findings'] } {
   const t = (text || '').trim()
   if (!t) return { summary: '', findings: [] }
@@ -366,17 +379,18 @@ async function runCritique() {
       for (const role of form.roles) {
         const tpl = prompts.find(p => p.id === role || p.title === role)
         const idx = progressList.value.findIndex(p => p.model === model && p.role === roleLabel(role))
-        if (!tpl) {
+        // 兜底：未找到内置提示词时，使用代码内置的 fallback
+        const templateContent = tpl ? sanitizeTemplate(tpl.content) : FALLBACK_PROMPTS[role]
+        if (!templateContent) {
           ElMessage.warning(`未找到评审提示词：${role}`)
           if (idx >= 0) progressList.value[idx].status = 'error'
           continue
         }
         if (idx >= 0) progressList.value[idx].status = 'running'
         try {
-          const userMsg = ai.renderTemplate(tpl.content, {
+          const userMsg = ai.renderTemplate(templateContent, {
             content,
             truth,
-            characters: '',
             chapterTitle: chapter.title
           })
           const text = await ai.chat(ai.buildRequest({
@@ -384,7 +398,8 @@ async function runCritique() {
             apiKey: provider.apiKey,
             model,
             messages: [{ role: 'user', content: userMsg }],
-            temperature: 0.3
+            temperature: 0.3,
+            maxTokens: 4096
           }))
           const parsed = parseCritiqueJSON(text)
           const saved = await db.Critiques.save({

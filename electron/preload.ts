@@ -1,6 +1,24 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webFrame } from 'electron'
 
 const api = {
+  // ====== 原生缩放（替代 CSS zoom，避免 teleported popper 错位）======
+  zoom: {
+    set: (factor: number) => {
+      try {
+        webFrame.setZoomFactor(Math.max(0.1, Math.min(3.0, factor)))
+      } catch (e) {
+        console.error('[preload] setZoomFactor 失败:', e)
+      }
+    },
+    get: () => {
+      try {
+        return webFrame.getZoomFactor()
+      } catch {
+        return 1
+      }
+    }
+  },
+
   // ====== 项目数据 ======
   store: {
     getProjects: () => ipcRenderer.invoke('store:projects:list'),

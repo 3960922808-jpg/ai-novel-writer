@@ -46,11 +46,16 @@ export const useSettingsStore = defineStore('settings', () => {
     if (settings.value) {
       document.documentElement.style.fontSize = `${settings.value.fontSize}px`
     }
-    // 应用界面缩放（类似浏览器 Ctrl+加号/减号）
+    // 应用界面缩放（使用 Electron 原生 webFrame，避免 CSS zoom 导致 teleported popper 错位）
     if (settings.value) {
       const z = settings.value.zoomLevel ?? 100
-      // Electron 是 Chromium，document.body.style.zoom 完整支持
-      document.body.style.zoom = `${z}%`
+      const factor = Math.max(0.1, Math.min(3.0, z / 100))
+      // 优先使用原生 webFrame，回退到 CSS zoom
+      if (typeof window !== 'undefined' && (window as any).api?.zoom) {
+        ;(window as any).api.zoom.set(factor)
+      } else {
+        document.body.style.zoom = `${z}%`
+      }
     }
   }
 

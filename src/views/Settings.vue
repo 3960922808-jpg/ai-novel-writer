@@ -51,7 +51,7 @@
 
         <el-form-item label="界面缩放">
           <div class="slider-row">
-            <el-slider v-model="form.zoomLevel" :min="70" :max="150" :step="10" style="flex: 1" @input="onZoomChange" />
+            <el-slider v-model="form.zoomLevel" :min="70" :max="150" :step="5" style="flex: 1" @input="onZoomChange" />
             <span class="slider-val">{{ form.zoomLevel }}%</span>
           </div>
           <span class="text-faint text-xs" style="display:block; margin-top:2px">

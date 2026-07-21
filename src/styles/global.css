@@ -55,6 +55,18 @@ html, body, #app {
 ::-webkit-scrollbar-track { background: transparent; }
 html.dark ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); }
 
+/* 编辑器底部输入栏的下拉框加宽（避免模型名/提示词被截断） */
+.editor-input-popper.el-popper {
+  min-width: 220px !important;
+  max-width: 360px;
+}
+.editor-input-popper .el-select-dropdown__item {
+  white-space: normal;
+  word-break: break-all;
+  line-height: 1.4;
+  padding: 6px 12px;
+}
+
 /* 通用类 */
 .flex { display: flex; flex-wrap: wrap; }
 .flex-col { display: flex; flex-direction: column; }

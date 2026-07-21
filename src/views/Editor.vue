@@ -407,7 +407,16 @@
         <!-- 底部操作行 -->
         <div class="input-bottom">
           <div class="input-bottom-left">
-            <el-select v-model="selectedPromptId" placeholder="选择提示词 ▽" size="small" style="width: 140px" filterable clearable>
+            <el-select
+              v-model="selectedPromptId"
+              placeholder="选择提示词 ▽"
+              size="small"
+              style="width: 140px"
+              filterable
+              clearable
+              placement="top"
+              popper-class="editor-input-popper"
+            >
               <el-option-group label="内置">
                 <el-option v-for="p in builtinPrompts" :key="p.id" :label="p.title" :value="p.id" />
               </el-option-group>
@@ -415,7 +424,14 @@
                 <el-option v-for="p in projectPrompts" :key="p.id" :label="p.title" :value="p.id" />
               </el-option-group>
             </el-select>
-            <el-select v-model="aiModel" placeholder="进阶模型" size="small" style="width: 140px">
+            <el-select
+              v-model="aiModel"
+              placeholder="进阶模型"
+              size="small"
+              style="width: 140px"
+              placement="top"
+              popper-class="editor-input-popper"
+            >
               <el-option v-for="m in models" :key="m.model" :label="m.model" :value="m.model" />
             </el-select>
           </div>
