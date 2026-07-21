@@ -1,5 +1,12 @@
 <template>
-  <div class="page" v-if="project">
+  <div class="page">
+    <!-- project 未加载时显示骨架占位，避免根元素 v-if 整页空白 -->
+    <div v-if="!project" class="loading-state">
+      <el-icon class="rotating"><Loading /></el-icon>
+      <p class="text-muted">正在加载项目...</p>
+    </div>
+
+    <template v-else>
     <!-- 顶部工具栏 -->
     <div class="page-header">
       <div>
@@ -23,40 +30,43 @@
       </div>
     </div>
 
-    <!-- 角色卡片网格 -->
-    <div v-loading="loading" class="char-grid" v-if="filtered.length > 0">
-      <div
-        v-for="c in filtered"
-        :key="c.id"
-        class="char-card"
-        :style="{ '--avatar-color': avatarColor(c.name) }"
-        @click="openEditor(c)"
-      >
-        <div class="card-header">
-          <div class="avatar">{{ (c.name || '?')[0] }}</div>
-          <div class="card-meta">
-            <div class="char-name">{{ c.name || '未命名' }}</div>
-            <el-tag size="small" :type="roleType(c.role)" effect="plain">{{ c.role }}</el-tag>
+    <!-- 始终渲染的 wrapper：v-loading 挂这里，避免与 v-if 冲突导致加载期间空白 -->
+    <div v-loading="loading" class="content-wrapper">
+      <!-- 角色卡片网格 -->
+      <div class="char-grid" v-if="filtered.length > 0">
+        <div
+          v-for="c in filtered"
+          :key="c.id"
+          class="char-card"
+          :style="{ '--avatar-color': avatarColor(c.name) }"
+          @click="openEditor(c)"
+        >
+          <div class="card-header">
+            <div class="avatar">{{ (c.name || '?')[0] }}</div>
+            <div class="card-meta">
+              <div class="char-name">{{ c.name || '未命名' }}</div>
+              <el-tag size="small" :type="roleType(c.role)" effect="plain">{{ c.role }}</el-tag>
+            </div>
+          </div>
+          <div class="card-tags" v-if="c.tags && c.tags.length">
+            <el-tag v-for="(t, i) in c.tags.slice(0, 3)" :key="i" size="small" type="info" effect="plain">{{ t }}</el-tag>
+            <span v-if="c.tags.length > 3" class="text-faint text-xs">+{{ c.tags.length - 3 }}</span>
+          </div>
+          <div class="card-desc" v-if="c.personality">{{ c.personality }}</div>
+          <div class="card-footer">
+            <span v-if="c.age" class="text-faint text-xs">年龄 {{ c.age }}</span>
+            <span v-if="c.gender" class="text-faint text-xs">{{ c.gender }}</span>
           </div>
         </div>
-        <div class="card-tags" v-if="c.tags && c.tags.length">
-          <el-tag v-for="(t, i) in c.tags.slice(0, 3)" :key="i" size="small" type="info" effect="plain">{{ t }}</el-tag>
-          <span v-if="c.tags.length > 3" class="text-faint text-xs">+{{ c.tags.length - 3 }}</span>
-        </div>
-        <div class="card-desc" v-if="c.personality">{{ c.personality }}</div>
-        <div class="card-footer">
-          <span v-if="c.age" class="text-faint text-xs">年龄 {{ c.age }}</span>
-          <span v-if="c.gender" class="text-faint text-xs">{{ c.gender }}</span>
-        </div>
       </div>
-    </div>
 
-    <!-- 空状态 -->
-    <div v-else-if="!loading" class="empty-state">
-      <el-icon class="empty-icon"><User /></el-icon>
-      <h3>{{ keyword || filterRole ? '没有匹配的角色' : '角色库还是空的' }}</h3>
-      <p class="text-muted text-sm">{{ keyword || filterRole ? '试试调整搜索条件' : '点击「新建角色」或「AI 生成」开始' }}</p>
-      <el-button v-if="!keyword && !filterRole" type="primary" :icon="Plus" @click="createCharacter" style="margin-top: 12px">新建第一个角色</el-button>
+      <!-- 空状态：不依赖 loading，避免加载期间什么都不显示 -->
+      <div v-else class="empty-state">
+        <el-icon class="empty-icon"><User /></el-icon>
+        <h3>{{ keyword || filterRole ? '没有匹配的角色' : '角色库还是空的' }}</h3>
+        <p class="text-muted text-sm">{{ keyword || filterRole ? '试试调整搜索条件' : '点击「新建角色」或「AI 生成」开始' }}</p>
+        <el-button v-if="!keyword && !filterRole" type="primary" :icon="Plus" @click="createCharacter" style="margin-top: 12px">新建第一个角色</el-button>
+      </div>
     </div>
 
     <!-- 编辑抽屉 -->
@@ -203,13 +213,14 @@
         <el-button type="primary" :loading="aiGenerating" @click="doAiGenerate">生成并创建</el-button>
       </template>
     </el-dialog>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete, Search, User, MagicStick, Check, ArrowLeft } from '@element-plus/icons-vue'
+import { Plus, Delete, Search, User, MagicStick, Check, ArrowLeft, Loading } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { useSettingsStore } from '@/stores/settings'
 import { Characters, Prompts } from '@/services/db'
@@ -250,8 +261,13 @@ const aiGenerating = ref(false)
 const aiForm = ref({ setup: '', count: 3, model: '' })
 
 watch(models, (ms) => {
-  if (!aiForm.value.model && ms.length > 0) {
-    aiForm.value.model = ms[0].model
+  // try/catch 兜底：settings 未就绪或 apiKeys 缺失时，availableModels() 可能抛错
+  try {
+    if (!aiForm.value.model && Array.isArray(ms) && ms.length > 0) {
+      aiForm.value.model = ms[0].model
+    }
+  } catch (e) {
+    console.error('[Characters] watch models error:', e)
   }
 }, { immediate: true })
 
@@ -538,6 +554,30 @@ function formatTime(ts: number) {
 </script>
 
 <style scoped>
+/* project 未加载时的骨架占位 */
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 120px 20px;
+  text-align: center;
+  color: var(--text-3);
+  gap: 12px;
+}
+.loading-state .rotating {
+  animation: rotate 1s linear infinite;
+  font-size: 32px;
+  color: var(--primary);
+}
+@keyframes rotate {
+  to { transform: rotate(360deg); }
+}
+/* 内容 wrapper：始终渲染，承载 v-loading */
+.content-wrapper {
+  min-height: 200px;
+}
+
 /* 角色卡片网格 */
 .char-grid {
   display: grid;

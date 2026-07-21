@@ -56,9 +56,10 @@ export async function initDB() {
   if (!db.data.settings) db.data.settings = null
   // 一次性数据迁移：v1.3.5 清空所有角色数据（用户要求重建角色库）
   // 通过 settings._migratedCharWipe 标记确保只执行一次
-  if (!db.data.settings || !(db.data.settings as any)._migratedCharWipe) {
+  // 注意：settings 为 null 的情况交给 store:settings:get 处理（它有完整默认值）
+  if (db.data.settings && !(db.data.settings as any)._migratedCharWipe) {
     db.data.characters = []
-    if (db.data.settings) (db.data.settings as any)._migratedCharWipe = true
+    ;(db.data.settings as any)._migratedCharWipe = true
     await db.write()
     console.log('[db] 已清空角色库（v1.3.5 一次性迁移）')
   }
