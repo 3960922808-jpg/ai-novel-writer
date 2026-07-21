@@ -63,7 +63,47 @@
       <div class="card section-card">
         <div class="section-title-row">
           <div class="section-title">API 配置</div>
-          <el-button size="small" :icon="Plus" type="primary" @click="addProvider">添加自定义 Provider</el-button>
+          <div class="add-provider-group">
+            <el-dropdown trigger="click" @command="quickAddProvider" placement="bottom-end">
+              <el-button size="small" type="primary" :icon="Plus">
+                快速添加<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="openai">
+                    <div class="quick-item">
+                      <div class="quick-name">OpenAI</div>
+                      <div class="quick-desc text-faint text-xs">gpt-4o / gpt-4o-mini 等</div>
+                    </div>
+                  </el-dropdown-item>
+                  <el-dropdown-item command="deepseek">
+                    <div class="quick-item">
+                      <div class="quick-name">DeepSeek</div>
+                      <div class="quick-desc text-faint text-xs">deepseek-chat / deepseek-reasoner</div>
+                    </div>
+                  </el-dropdown-item>
+                  <el-dropdown-item command="zhipu">
+                    <div class="quick-item">
+                      <div class="quick-name">智谱 AI</div>
+                      <div class="quick-desc text-faint text-xs">glm-4 / glm-4-flash 等</div>
+                    </div>
+                  </el-dropdown-item>
+                  <el-dropdown-item command="minimax">
+                    <div class="quick-item">
+                      <div class="quick-name">MiniMax</div>
+                      <div class="quick-desc text-faint text-xs">abab6.5 / abab6.5s 等</div>
+                    </div>
+                  </el-dropdown-item>
+                  <el-dropdown-item command="custom" divided>
+                    <div class="quick-item">
+                      <div class="quick-name">自定义 Provider</div>
+                      <div class="quick-desc text-faint text-xs">手动填写所有信息</div>
+                    </div>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
         </div>
         <div class="text-faint text-xs" style="margin-bottom: 12px">
           模型只能通过下方 API 配置管理。第一个配置了 API Key 的 Provider 将作为默认使用。
@@ -220,7 +260,7 @@ import { ref, reactive, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  ArrowLeft, Check, Plus, Sunny, Moon, Refresh, Monitor, Link,
+  ArrowLeft, ArrowDown, Check, Plus, Sunny, Moon, Refresh, Monitor, Link,
   Connection, Delete, CircleCheck, CircleClose
 } from '@element-plus/icons-vue'
 import { useSettingsStore } from '@/stores/settings'
@@ -311,6 +351,76 @@ const modelInputRefs = ref<any[] | null>(null)
 // 测试连通性状态
 const testingIdx = ref<number | null>(null)
 const testResults = ref<Record<number, { ok: boolean; msg: string }>>({})
+
+// 大模型快速设置预设
+interface ProviderPreset {
+  key: string
+  label: string
+  provider: string
+  baseUrl: string
+  models: string[]
+  website: string
+}
+
+const PROVIDER_PRESETS: ProviderPreset[] = [
+  {
+    key: 'openai',
+    label: 'OpenAI',
+    provider: 'OpenAI',
+    baseUrl: 'https://api.openai.com/v1',
+    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+    website: 'https://platform.openai.com/api-keys'
+  },
+  {
+    key: 'deepseek',
+    label: 'DeepSeek',
+    provider: 'DeepSeek',
+    baseUrl: 'https://api.deepseek.com/v1',
+    models: ['deepseek-chat', 'deepseek-reasoner'],
+    website: 'https://platform.deepseek.com/api_keys'
+  },
+  {
+    key: 'zhipu',
+    label: '智谱 AI',
+    provider: '智谱AI',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    models: ['glm-4', 'glm-4-flash', 'glm-4-air', 'glm-4-long'],
+    website: 'https://open.bigmodel.cn/usercenter/apikeys'
+  },
+  {
+    key: 'minimax',
+    label: 'MiniMax',
+    provider: 'MiniMax',
+    baseUrl: 'https://api.minimax.chat/v1',
+    models: ['abab6.5-chat', 'abab6.5s-chat', 'abab6.5g-chat', 'abab6-chat'],
+    website: 'https://platform.minimaxi.com/user-center/basic-information/interface-key'
+  }
+]
+
+// 快速添加：根据预设填入 baseUrl/模型列表，apiKey 留空待用户填写
+function quickAddProvider(cmd: string) {
+  if (cmd === 'custom' || !cmd) {
+    addProvider()
+    return
+  }
+  const preset = PROVIDER_PRESETS.find(p => p.key === cmd)
+  if (!preset) {
+    addProvider()
+    return
+  }
+  // 已存在同名 provider 则提示
+  if (form.apiKeys.some(p => p.provider === preset.provider)) {
+    ElMessage.warning(`${preset.label} 已存在，请直接在下方填写 API Key`)
+    return
+  }
+  form.apiKeys.push({
+    provider: preset.provider,
+    baseUrl: preset.baseUrl,
+    apiKey: '',
+    models: [...preset.models]
+  })
+  ElMessage.success(`已添加 ${preset.label} 预设，请填写 API Key。申请地址：${preset.website}`)
+}
 
 // 添加自定义 Provider
 function addProvider() {
@@ -560,6 +670,22 @@ async function save() {
   margin-bottom: 0;
   padding-left: 0;
   border-left: none;
+}
+/* 快速添加下拉项 */
+.quick-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+}
+.quick-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+.quick-desc {
+  font-size: 11px;
+  color: var(--text-3);
 }
 .test-result {
   display: flex;
