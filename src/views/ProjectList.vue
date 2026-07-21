@@ -239,7 +239,8 @@ async function doCreate() {
   }
   creating.value = true
   try {
-    const settings = await db.getSettings()
+    const defModel = settingsStore.defaultModel()
+    const defProvider = settingsStore.defaultProvider()
     const p = await db.saveProject({
       title: form.value.title.trim(),
       genre: form.value.genre,
@@ -250,8 +251,8 @@ async function doCreate() {
       createdAt: 0,
       updatedAt: 0,
       settings: {
-        model: settings.defaultModel,
-        baseUrl: settings.defaultBaseUrl,
+        model: defModel,
+        baseUrl: defProvider?.baseUrl || '',
         apiKey: '',
         temperature: 0.8,
         maxTokens: 2048,

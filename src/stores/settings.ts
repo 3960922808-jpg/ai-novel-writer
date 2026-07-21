@@ -79,21 +79,6 @@ export const useSettingsStore = defineStore('settings', () => {
     else (mq as any).addListener?.(mqListener)
   }
 
-  /** 根据模型名查找对应 API 配置 */
-  function findProviderForModel(model: string): { baseUrl: string; apiKey: string } | null {
-    if (!settings.value) return null
-    for (const p of settings.value.apiKeys) {
-      if (p.models.includes(model) && p.apiKey) {
-        return { baseUrl: p.baseUrl, apiKey: p.apiKey }
-      }
-    }
-    // 回退到默认
-    return {
-      baseUrl: settings.value.defaultBaseUrl,
-      apiKey: settings.value.apiKeys.find(p => p.baseUrl === settings.value!.defaultBaseUrl)?.apiKey || ''
-    }
-  }
-
   /** 所有可用模型（已配置 Key 的） */
   function availableModels(): { provider: string; model: string }[] {
     if (!settings.value) return []
@@ -106,5 +91,40 @@ export const useSettingsStore = defineStore('settings', () => {
     return r
   }
 
-  return { settings, loading, load, update, applyTheme, findProviderForModel, availableModels }
+  /** 默认模型：取 API 配置中第一个可用模型（不再允许手动指定） */
+  function defaultModel(): string {
+    const m = availableModels()[0]
+    return m?.model || ''
+  }
+
+  /** 默认 provider：取第一个配置了 apiKey 的 provider */
+  function defaultProvider(): { provider: string; baseUrl: string; apiKey: string } | null {
+    if (!settings.value) return null
+    for (const p of settings.value.apiKeys) {
+      if (p.apiKey && p.models.length > 0) {
+        return { provider: p.provider, baseUrl: p.baseUrl, apiKey: p.apiKey }
+      }
+    }
+    return null
+  }
+
+  /** 根据模型名查找对应 API 配置 */
+  function findProviderForModel(model: string): { baseUrl: string; apiKey: string } | null {
+    if (!settings.value) return null
+    for (const p of settings.value.apiKeys) {
+      if (p.models.includes(model) && p.apiKey) {
+        return { baseUrl: p.baseUrl, apiKey: p.apiKey }
+      }
+    }
+    // 回退到默认 provider（第一个配置了 apiKey 的）
+    const def = defaultProvider()
+    if (def) return { baseUrl: def.baseUrl, apiKey: def.apiKey }
+    return null
+  }
+
+  return {
+    settings, loading, load, update, applyTheme,
+    findProviderForModel, availableModels,
+    defaultModel, defaultProvider
+  }
 })

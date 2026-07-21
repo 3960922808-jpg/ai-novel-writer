@@ -1539,7 +1539,7 @@ onMounted(async () => {
     }
     await loadChapter(currentChapterId.value)
     if (!aiModel.value && models.value.length > 0) {
-      aiModel.value = project.value?.settings.model || models.value[0].model
+      aiModel.value = project.value?.settings.model || settings.defaultModel() || models.value[0].model
     }
   } catch (e: any) {
     ElMessage.error('初始化失败：' + e.message)

@@ -119,8 +119,10 @@ export function registerStoreIPC() {
     const db = getDB()
     if (!db.data.settings) {
       db.data.settings = {
-        defaultModel: 'gpt-4o-mini',
-        defaultBaseUrl: 'https://api.openai.com/v1',
+        // v1.4.0+: defaultModel / defaultBaseUrl 已废弃，模型只通过 apiKeys 配置
+        // 保留字段为空字符串，仅供老版本读取兼容
+        defaultModel: '',
+        defaultBaseUrl: '',
         apiKeys: [
           { provider: 'OpenAI', baseUrl: 'https://api.openai.com/v1', apiKey: '', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo'] },
           { provider: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', apiKey: '', models: ['deepseek-chat', 'deepseek-reasoner'] },
@@ -140,6 +142,12 @@ export function registerStoreIPC() {
       }
       await db.write()
       console.log('[settings] 首次创建默认 settings')
+    }
+    // v1.4.0：清空老数据中残留的 defaultModel / defaultBaseUrl（用户应通过 API 配置管理）
+    if (db.data.settings && (db.data.settings.defaultModel || db.data.settings.defaultBaseUrl)) {
+      db.data.settings.defaultModel = ''
+      db.data.settings.defaultBaseUrl = ''
+      await db.write()
     }
     // 老数据兼容：补齐新字段
     if (db.data.settings && !('searchProvider' in db.data.settings)) {

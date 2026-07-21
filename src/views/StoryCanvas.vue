@@ -906,7 +906,7 @@ function generateChapterFromWorkflow() {
   }
   generatedText.value = ''
   genForm.chapterId = chapters.value[0]?.id || ''
-  genForm.model = settings.settings?.defaultModel || availableModels.value[0]?.model || ''
+  genForm.model = settings.defaultModel() || availableModels.value[0]?.model || ''
   genDialogVisible.value = true
 }
 

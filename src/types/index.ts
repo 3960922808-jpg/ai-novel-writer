@@ -165,8 +165,10 @@ export interface ChapterVersion {
 
 /** 全局设置 */
 export interface AppSettings {
-  defaultModel: string
-  defaultBaseUrl: string
+  /** @deprecated v1.4.0：模型只能通过 apiKeys 配置，defaultModel 不再使用 */
+  defaultModel?: string
+  /** @deprecated v1.4.0：默认 baseUrl 由 apiKeys 中第一个 provider 决定 */
+  defaultBaseUrl?: string
   apiKeys: { provider: string; baseUrl: string; apiKey: string; models: string[] }[]
   theme: 'light' | 'dark'
   fontSize: number

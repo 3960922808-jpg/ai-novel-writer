@@ -320,7 +320,7 @@ function openTest(p: Prompt) {
   Object.keys(testVars).forEach(k => delete testVars[k])
   p.variables.forEach(v => { testVars[v] = '' })
   testResult.value = ''
-  testModel.value = settings.settings?.defaultModel || (models.value[0]?.model || '')
+  testModel.value = settings.defaultModel() || (models.value[0]?.model || '')
   testVisible.value = true
 }
 

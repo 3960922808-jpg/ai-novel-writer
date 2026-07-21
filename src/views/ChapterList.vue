@@ -116,7 +116,7 @@ const models = computed(() => settings.availableModels())
 
 const outlineVisible = ref(false)
 const autoGenerating = ref(false)
-const outlineForm = ref({ setup: '', count: 10, model: settings.settings?.defaultModel || '' })
+const outlineForm = ref({ setup: '', count: 10, model: settings.defaultModel() || '' })
 
 onMounted(() => {
   try {

@@ -61,33 +61,12 @@
       </div>
 
       <div class="card section-card">
-        <div class="section-title">默认 AI</div>
-
-        <el-form-item label="默认模型">
-          <el-select
-            v-model="form.defaultModel"
-            placeholder="选择默认模型"
-            style="width: 100%"
-            filterable
-          >
-            <el-option
-              v-for="m in modelOptions"
-              :key="m.provider + '/' + m.model"
-              :label="`${m.model}（${m.provider}）`"
-              :value="m.model"
-            />
-          </el-select>
-        </el-form-item>
-
-        <el-form-item label="默认 BaseURL">
-          <el-input v-model="form.defaultBaseUrl" placeholder="例如：https://api.openai.com/v1" />
-        </el-form-item>
-      </div>
-
-      <div class="card section-card">
         <div class="section-title-row">
           <div class="section-title">API 配置</div>
           <el-button size="small" :icon="Plus" type="primary" @click="addProvider">添加自定义 Provider</el-button>
+        </div>
+        <div class="text-faint text-xs" style="margin-bottom: 12px">
+          模型只能通过下方 API 配置管理。第一个配置了 API Key 的 Provider 将作为默认使用。
         </div>
 
         <div v-for="(p, idx) in form.apiKeys" :key="idx" class="provider-card">
@@ -237,7 +216,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, nextTick, onMounted } from 'vue'
+import { ref, reactive, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
@@ -270,8 +249,6 @@ const form = reactive<AppSettings>({
   askMode: 'auto',
   zoomLevel: 100
 })
-
-const modelOptions = computed(() => settingsStore.availableModels())
 
 // 当前版本号 — 从 package.json 注入到 vite define 或回退到 1.0.0
 const currentVersion = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_APP_VERSION) || '1.0.0'
@@ -475,15 +452,15 @@ function removeModel(idx: number, mi: number) {
 }
 
 async function save() {
-  if (!form.defaultModel.trim()) {
-    ElMessage.warning('请选择默认模型')
+  // 校验：至少配置一个 Provider 的 API Key
+  const hasKey = form.apiKeys.some(p => p.apiKey && p.apiKey.trim() && p.models.length > 0)
+  if (!hasKey) {
+    ElMessage.warning('请至少为某个 Provider 配置 API Key 与模型')
     return
   }
   saving.value = true
   try {
     await settingsStore.update({
-      defaultModel: form.defaultModel,
-      defaultBaseUrl: form.defaultBaseUrl,
       apiKeys: JSON.parse(JSON.stringify(form.apiKeys)),
       theme: form.theme,
       fontSize: form.fontSize,

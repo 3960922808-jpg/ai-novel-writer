@@ -245,7 +245,7 @@ function countChars(text: string): number {
 onMounted(async () => {
   if (!settingsStore.settings) await settingsStore.load()
   if (!modelChoice.value && project.value) {
-    modelChoice.value = project.value.settings.model || settingsStore.settings?.defaultModel || ''
+    modelChoice.value = project.value.settings.model || settingsStore.defaultModel() || ''
   }
 })
 

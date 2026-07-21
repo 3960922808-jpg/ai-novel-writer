@@ -256,7 +256,7 @@ function buildPrompt(file: TruthFile, ctx: { chapterSummaries: string }): string
 
 function pickModel(): string {
   if (!project.value) return ''
-  return project.value.settings.model || settings.settings?.defaultModel || ''
+  return project.value.settings.model || settings.defaultModel() || ''
 }
 
 async function aiGenerateSingle(key: string) {

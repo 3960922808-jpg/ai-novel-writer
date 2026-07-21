@@ -214,7 +214,7 @@ watch(() => project.value?.id, () => {
 
 onMounted(() => {
   if (availableModels.value.length > 0) {
-    model.value = settings.settings?.defaultModel || availableModels.value[0].model
+    model.value = settings.defaultModel() || availableModels.value[0].model
   }
 })
 
