@@ -378,7 +378,7 @@
             </div>
           </div>
 
-          <!-- @ 关联弹出菜单 -->
+          <!-- @ 关联弹出菜单（轻量内嵌下拉，仅展示前 8 项，点击更多打开多选小窗） -->
           <div v-if="atMenuVisible" class="slash-menu at-menu">
             <div class="slash-menu-header">
               <span>关联内容（@）</span>
@@ -386,7 +386,7 @@
             </div>
             <div class="slash-menu-list">
               <button
-                v-for="(m, i) in atMatches"
+                v-for="(m, i) in atMatches.slice(0, 8)"
                 :key="i"
                 class="slash-menu-item"
                 @click="pickAtMatch(m)"
@@ -395,6 +395,13 @@
                 <div class="slash-item-body">
                   <div class="slash-item-name">{{ m.label }} <span class="text-faint text-xs">[{{ m.type }}]</span></div>
                   <div class="slash-item-desc text-faint text-xs">{{ m.preview }}</div>
+                </div>
+              </button>
+              <button class="slash-menu-item more-item" @click="openAtPicker">
+                <el-icon class="slash-icon"><More /></el-icon>
+                <div class="slash-item-body">
+                  <div class="slash-item-name">多选关联…</div>
+                  <div class="slash-item-desc text-faint text-xs">打开多选小窗，可勾选多个文件批量关联</div>
                 </div>
               </button>
               <div v-if="atMatches.length === 0" class="slash-empty text-faint text-xs">
@@ -457,6 +464,76 @@
         </div>
       </div>
     </el-drawer>
+
+    <!-- @ 多选关联小窗（非全覆盖，居中浮层） -->
+    <el-dialog
+      v-model="atPickerVisible"
+      title="选择要关联的内容"
+      width="560px"
+      class="at-picker-dialog"
+      :close-on-click-modal="true"
+      append-to-body
+    >
+      <div class="at-picker">
+        <!-- 搜索框 -->
+        <el-input
+          v-model="atPickerKeyword"
+          placeholder="搜索章节 / 设定 / 地点…"
+          :prefix-icon="Search"
+          clearable
+          size="default"
+          style="margin-bottom: 12px"
+        />
+        <!-- 已选计数 -->
+        <div class="at-picker-summary text-faint text-xs">
+          已选 <b style="color: var(--primary)">{{ atPickerSelected.size }}</b> 项
+          <span v-if="atPickerKeyword"> · 关键词：「{{ atPickerKeyword }}」</span>
+        </div>
+        <!-- 分组列表 -->
+        <div class="at-picker-groups">
+          <div v-for="g in atPickerGrouped" :key="g.type" class="at-picker-group">
+            <div class="at-group-header" @click="toggleGroup(g.type)">
+              <el-icon class="at-group-toggle">
+                <ArrowDown v-if="atPickerCollapsed[g.type] === false" />
+                <ArrowRight v-else />
+              </el-icon>
+              <span class="at-group-name">{{ g.type }}</span>
+              <span class="at-group-count text-faint text-xs">{{ g.items.length }} 项</span>
+            </div>
+            <div v-if="atPickerCollapsed[g.type] === false" class="at-group-body">
+              <label
+                v-for="m in g.items"
+                :key="m.type + '|' + m.label"
+                class="at-item"
+                :class="{ checked: atPickerSelected.has(m.type + '|' + m.label) }"
+              >
+                <input
+                  type="checkbox"
+                  class="at-item-check"
+                  :checked="atPickerSelected.has(m.type + '|' + m.label)"
+                  @change="toggleAtPickerItem(m)"
+                />
+                <el-icon class="at-item-icon"><component :is="m.icon" /></el-icon>
+                <div class="at-item-body">
+                  <div class="at-item-name">{{ m.label }}</div>
+                  <div class="at-item-preview text-faint text-xs">{{ m.preview }}</div>
+                </div>
+              </label>
+              <div v-if="g.items.length === 0" class="at-group-empty text-faint text-xs">无匹配项</div>
+            </div>
+          </div>
+          <div v-if="atPickerGrouped.length === 0" class="at-picker-empty text-faint">
+            没有可关联的内容，先去创建章节 / 设定 / 地点吧
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="atPickerVisible = false">取消</el-button>
+        <el-button @click="selectAllInPicker">全选</el-button>
+        <el-button @click="clearPickerSelection">清空</el-button>
+        <el-button type="primary" @click="confirmAtPicker">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -472,7 +549,7 @@ import {
   RefreshLeft, RefreshRight, Refresh, Switch,
   ChatLineRound, List, ChatDotRound, Link, Promotion,
   Star, DArrowLeft, DArrowRight, QuestionFilled, ChatLineSquare,
-  Location as LocationIcon, Reading, VideoPause
+  Location as LocationIcon, Reading, VideoPause, More
 } from '@element-plus/icons-vue'
 import { useEditor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
@@ -900,6 +977,131 @@ function pickAtMatch(m: AtMatch) {
   linkedItems.value.push({ label: m.label, content: m.content })
   atMenuVisible.value = false
   ElMessage.success(`已关联${m.type}：${m.label}`)
+  nextTick(() => inputRef.value?.focus())
+}
+
+// ===== @ 多选关联小窗 =====
+const atPickerVisible = ref(false)
+const atPickerKeyword = ref('')
+// 用 Set 存放 key（type|label），避免重复
+const atPickerSelected = ref<Set<string>>(new Set())
+// 待选条目（与 atMatches 同源，但不过滤关键词时返回全部）
+const atPickerAllItems = ref<AtMatch[]>([])
+// 分组折叠状态：false=展开, true=折叠
+const atPickerCollapsed = ref<Record<string, boolean>>({
+  '章节': false,
+  '设定': false,
+  '地点': false
+})
+
+/** 打开多选小窗：加载所有可关联项，初始已选 = 当前 linkedItems */
+function openAtPicker() {
+  atPickerAllItems.value = buildAllAtMatches()
+  atPickerKeyword.value = ''
+  atPickerSelected.value = new Set(
+    linkedItems.value.map(it => {
+      // 通过 label 反查 type（粗略匹配）
+      const found = atPickerAllItems.value.find(m => m.label === it.label)
+      return found ? `${found.type}|${found.label}` : `已关联|${it.label}`
+    })
+  )
+  // 默认展开所有分组
+  const types = new Set(atPickerAllItems.value.map(m => m.type))
+  for (const t of types) atPickerCollapsed.value[t] = false
+  atMenuVisible.value = false
+  atPickerVisible.value = true
+}
+
+/** 收集所有可关联项（不限制数量，用于多选小窗） */
+function buildAllAtMatches(): AtMatch[] {
+  return buildAtMatches('')
+}
+
+/** 按关键词过滤 + 按类型分组 */
+const atPickerGrouped = computed(() => {
+  const kw = atPickerKeyword.value.trim().toLowerCase()
+  const filtered = kw
+    ? atPickerAllItems.value.filter(m =>
+        m.label.toLowerCase().includes(kw) ||
+        m.type.toLowerCase().includes(kw) ||
+        (m.preview || '').toLowerCase().includes(kw)
+      )
+    : atPickerAllItems.value
+  // 分组
+  const groups: Record<string, AtMatch[]> = {}
+  for (const m of filtered) {
+    if (!groups[m.type]) groups[m.type] = []
+    groups[m.type].push(m)
+  }
+  // 固定顺序：章节 → 设定 → 地点 → 其它
+  const order = ['章节', '设定', '地点']
+  const types = Object.keys(groups).sort((a, b) => {
+    const ia = order.indexOf(a), ib = order.indexOf(b)
+    if (ia >= 0 && ib >= 0) return ia - ib
+    if (ia >= 0) return -1
+    if (ib >= 0) return 1
+    return a.localeCompare(b)
+  })
+  return types.map(t => ({ type: t, items: groups[t] }))
+})
+
+/** 切换分组折叠 */
+function toggleGroup(type: string) {
+  atPickerCollapsed.value[type] = atPickerCollapsed.value[type] === false ? true : false
+}
+
+/** 勾选/取消勾选某项 */
+function toggleAtPickerItem(m: AtMatch) {
+  const key = `${m.type}|${m.label}`
+  const s = new Set(atPickerSelected.value)
+  if (s.has(key)) s.delete(key)
+  else s.add(key)
+  atPickerSelected.value = s
+}
+
+/** 全选（当前过滤后的） */
+function selectAllInPicker() {
+  const s = new Set(atPickerSelected.value)
+  for (const g of atPickerGrouped.value) {
+    for (const m of g.items) s.add(`${m.type}|${m.label}`)
+  }
+  atPickerSelected.value = s
+}
+
+/** 清空选择 */
+function clearPickerSelection() {
+  atPickerSelected.value = new Set()
+}
+
+/** 确认：把已选项写入 linkedItems，并清理输入框里的 @xxx 文本 */
+function confirmAtPicker() {
+  // 找出所有被选中的 AtMatch
+  const selectedMatches: AtMatch[] = []
+  for (const m of atPickerAllItems.value) {
+    if (atPickerSelected.value.has(`${m.type}|${m.label}`)) {
+      selectedMatches.push(m)
+    }
+  }
+  // 找出已存在但本次未选中的（需要移除）
+  const newLabels = new Set(selectedMatches.map(m => m.label))
+  // 保留：① 不在 atPickerAllItems 中的（用户外部添加的），② 在新选中的
+  linkedItems.value = linkedItems.value.filter(it => {
+    // 在 picker 列表中但未选中 → 移除
+    const inPicker = atPickerAllItems.value.some(m => m.label === it.label)
+    if (inPicker && !newLabels.has(it.label)) return false
+    return true
+  })
+  // 追加新选中的（避免重复）
+  const existing = new Set(linkedItems.value.map(it => it.label))
+  for (const m of selectedMatches) {
+    if (!existing.has(m.label)) {
+      linkedItems.value.push({ label: m.label, content: m.content })
+    }
+  }
+  // 清理输入框中残留的 @xxx 片段
+  userInput.value = userInput.value.replace(/@[^\s@]*\s?/g, '').trim()
+  atPickerVisible.value = false
+  ElMessage.success(`已关联 ${selectedMatches.length} 项`)
   nextTick(() => inputRef.value?.focus())
 }
 
@@ -2334,6 +2536,127 @@ html.dark .tb-sep { background: #334155; }
 
 /* ===== @ 关联菜单（复用 slash-menu 样式） ===== */
 .at-menu { /* 与 .slash-menu 同位置，独立标记便于扩展 */ }
+.at-menu .more-item {
+  border-top: 1px dashed var(--border);
+  color: var(--primary);
+}
+.at-menu .more-item:hover {
+  background: rgba(0, 100, 250, 0.06);
+}
+
+/* ===== @ 多选关联小窗 ===== */
+.at-picker-dialog :deep(.el-dialog__body) {
+  padding-top: 8px;
+  max-height: 65vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.at-picker {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.at-picker-summary {
+  margin-bottom: 8px;
+}
+.at-picker-groups {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  background: var(--bg-2, transparent);
+}
+.at-picker-group {
+  border-bottom: 1px solid var(--border);
+  padding: 4px 0;
+}
+.at-picker-group:last-child {
+  border-bottom: none;
+}
+.at-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 13px;
+}
+.at-group-header:hover {
+  background: var(--bg-1, rgba(0,0,0,0.03));
+}
+.at-group-toggle {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.at-group-name {
+  flex: 1;
+}
+.at-group-count {
+  font-weight: normal;
+}
+.at-group-body {
+  padding: 2px 4px 6px 22px;
+}
+.at-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+.at-item:hover {
+  background: var(--bg-1, rgba(0,0,0,0.04));
+}
+.at-item.checked {
+  background: rgba(0, 122, 255, 0.08);
+}
+.at-item-check {
+  margin-top: 3px;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--primary, #007aff);
+  flex-shrink: 0;
+}
+.at-item-icon {
+  margin-top: 2px;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.at-item.checked .at-item-icon {
+  color: var(--primary, #007aff);
+}
+.at-item-body {
+  flex: 1;
+  min-width: 0;
+}
+.at-item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.at-item-preview {
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.at-group-empty,
+.at-picker-empty {
+  padding: 12px;
+  text-align: center;
+}
 
 /* ===== AI 提问选项卡片 ===== */
 .chat-options-card {
