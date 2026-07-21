@@ -1,6 +1,6 @@
 <template>
   <div class="page">
-    <!-- project 未加载时显示骨架占位，避免根元素 v-if 整页空白 -->
+    <!-- project 未加载时显示骨架占位 -->
     <div v-if="!project" class="loading-state">
       <el-icon class="rotating"><Loading /></el-icon>
       <p class="text-muted">正在加载项目...</p>
@@ -10,8 +10,8 @@
     <!-- 顶部工具栏 -->
     <div class="page-header">
       <div>
-        <h1 class="page-title">角色库</h1>
-        <p class="text-muted text-sm" style="margin: 4px 0 0">共 {{ characters.length }} 个角色</p>
+        <h1 class="page-title">人物库</h1>
+        <p class="text-muted text-sm" style="margin: 4px 0 0">共 {{ people.length }} 个人物</p>
       </div>
       <div class="flex gap-2 flex-wrap">
         <el-button :icon="ArrowLeft" @click="$router.push({ name: 'dashboard' })">返回</el-button>
@@ -26,53 +26,53 @@
           <el-option v-for="r in roles" :key="r" :label="r" :value="r" />
         </el-select>
         <el-button :icon="MagicStick" :loading="aiGenerating" @click="openAiDialog">AI 生成</el-button>
-        <el-button type="primary" :icon="Plus" @click="createCharacter">新建角色</el-button>
+        <el-button type="primary" :icon="Plus" @click="createPerson">新建人物</el-button>
       </div>
     </div>
 
-    <!-- 始终渲染的 wrapper：v-loading 挂这里，避免与 v-if 冲突导致加载期间空白 -->
+    <!-- 始终渲染的 wrapper：v-loading 挂这里 -->
     <div v-loading="loading" class="content-wrapper">
-      <!-- 角色卡片网格 -->
-      <div class="char-grid" v-if="filtered.length > 0">
+      <!-- 人物卡片网格 -->
+      <div class="people-grid" v-if="filtered.length > 0">
         <div
-          v-for="c in filtered"
-          :key="c.id"
-          class="char-card"
-          :style="{ '--avatar-color': avatarColor(c.name) }"
-          @click="openEditor(c)"
+          v-for="p in filtered"
+          :key="p.id"
+          class="person-card"
+          :style="{ '--avatar-color': avatarColor(p.name) }"
+          @click="openEditor(p)"
         >
           <div class="card-header">
-            <div class="avatar">{{ (c.name || '?')[0] }}</div>
+            <div class="avatar">{{ (p.name || '?')[0] }}</div>
             <div class="card-meta">
-              <div class="char-name">{{ c.name || '未命名' }}</div>
-              <el-tag size="small" :type="roleType(c.role)" effect="plain">{{ c.role }}</el-tag>
+              <div class="person-name">{{ p.name || '未命名' }}</div>
+              <el-tag size="small" :type="roleType(p.role)" effect="plain">{{ p.role }}</el-tag>
             </div>
           </div>
-          <div class="card-tags" v-if="c.tags && c.tags.length">
-            <el-tag v-for="(t, i) in c.tags.slice(0, 3)" :key="i" size="small" type="info" effect="plain">{{ t }}</el-tag>
-            <span v-if="c.tags.length > 3" class="text-faint text-xs">+{{ c.tags.length - 3 }}</span>
+          <div class="card-tags" v-if="p.tags && p.tags.length">
+            <el-tag v-for="(t, i) in p.tags.slice(0, 3)" :key="i" size="small" type="info" effect="plain">{{ t }}</el-tag>
+            <span v-if="p.tags.length > 3" class="text-faint text-xs">+{{ p.tags.length - 3 }}</span>
           </div>
-          <div class="card-desc" v-if="c.personality">{{ c.personality }}</div>
+          <div class="card-desc" v-if="p.personality">{{ p.personality }}</div>
           <div class="card-footer">
-            <span v-if="c.age" class="text-faint text-xs">年龄 {{ c.age }}</span>
-            <span v-if="c.gender" class="text-faint text-xs">{{ c.gender }}</span>
+            <span v-if="p.age" class="text-faint text-xs">年龄 {{ p.age }}</span>
+            <span v-if="p.gender" class="text-faint text-xs">{{ p.gender }}</span>
           </div>
         </div>
       </div>
 
-      <!-- 空状态：不依赖 loading，避免加载期间什么都不显示 -->
+      <!-- 空状态 -->
       <div v-else class="empty-state">
         <el-icon class="empty-icon"><User /></el-icon>
-        <h3>{{ keyword || filterRole ? '没有匹配的角色' : '角色库还是空的' }}</h3>
-        <p class="text-muted text-sm">{{ keyword || filterRole ? '试试调整搜索条件' : '点击「新建角色」或「AI 生成」开始' }}</p>
-        <el-button v-if="!keyword && !filterRole" type="primary" :icon="Plus" @click="createCharacter" style="margin-top: 12px">新建第一个角色</el-button>
+        <h3>{{ keyword || filterRole ? '没有匹配的人物' : '人物库还是空的' }}</h3>
+        <p class="text-muted text-sm">{{ keyword || filterRole ? '试试调整搜索条件' : '点击「新建人物」或「AI 生成」开始' }}</p>
+        <el-button v-if="!keyword && !filterRole" type="primary" :icon="Plus" @click="createPerson" style="margin-top: 12px">新建第一个人物</el-button>
       </div>
     </div>
 
     <!-- 编辑抽屉 -->
     <el-drawer
       v-model="editorVisible"
-      :title="current?.id ? '编辑角色' : '新建角色'"
+      :title="current?.id ? '编辑人物' : '新建人物'"
       direction="rtl"
       size="640px"
       :close-on-click-modal="false"
@@ -83,7 +83,7 @@
         <div class="editor-head">
           <div class="avatar lg" :style="{ background: avatarColor(current.name) }">{{ (current.name || '?')[0] }}</div>
           <div class="flex-1">
-            <input v-model="current.name" class="name-input" placeholder="角色姓名" />
+            <input v-model="current.name" class="name-input" placeholder="人物姓名" />
             <div class="text-faint text-xs" style="margin-top: 4px">
               {{ current.createdAt ? `创建于 ${formatTime(current.createdAt)}` : '新建中' }}
             </div>
@@ -95,7 +95,7 @@
           <div class="section-label">基本信息</div>
           <div class="form-grid">
             <div class="form-item">
-              <label>角色类型</label>
+              <label>人物类型</label>
               <el-select v-model="current.role" style="width: 100%">
                 <el-option v-for="r in roles" :key="r" :label="r" :value="r" />
               </el-select>
@@ -146,12 +146,12 @@
               <el-input v-model="current.abilities" type="textarea" :rows="3" placeholder="能力/技能..." />
             </div>
             <div class="form-item">
-              <label>角色目标</label>
-              <el-input v-model="current.goals" type="textarea" :rows="3" placeholder="角色目标..." />
+              <label>人物目标</label>
+              <el-input v-model="current.goals" type="textarea" :rows="3" placeholder="人物目标..." />
             </div>
             <div class="form-item">
               <label>成长弧线</label>
-              <el-input v-model="current.arc" type="textarea" :rows="3" placeholder="角色成长弧线..." />
+              <el-input v-model="current.arc" type="textarea" :rows="3" placeholder="人物成长弧线..." />
             </div>
           </div>
         </div>
@@ -164,8 +164,8 @@
           </div>
           <div v-if="current.relationships.length === 0" class="text-faint text-sm" style="padding: 4px 0">暂无关系</div>
           <div v-for="(r, i) in current.relationships" :key="i" class="rel-row">
-            <el-select v-model="r.targetId" placeholder="选择角色" style="width: 140px" @change="(v: string) => onRelTargetChange(v, i)">
-              <el-option v-for="oc in otherCharacters(current.id)" :key="oc.id" :label="oc.name" :value="oc.id" />
+            <el-select v-model="r.targetId" placeholder="选择人物" style="width: 140px" @change="(v: string) => onRelTargetChange(v, i)">
+              <el-option v-for="oc in otherPeople(current.id)" :key="oc.id" :label="oc.name" :value="oc.id" />
             </el-select>
             <el-input v-model="r.type" placeholder="关系类型" style="width: 110px" />
             <el-input v-model="r.description" placeholder="关系描述" class="flex-1" />
@@ -185,16 +185,16 @@
 
       <template #footer>
         <div class="drawer-footer">
-          <el-button v-if="current?.id" type="danger" plain :icon="Delete" @click="removeChar">删除角色</el-button>
+          <el-button v-if="current?.id" type="danger" plain :icon="Delete" @click="removePerson">删除人物</el-button>
           <div class="flex-1"></div>
           <el-button @click="editorVisible = false">取消</el-button>
-          <el-button type="primary" :icon="Check" @click="saveChar">保存</el-button>
+          <el-button type="primary" :icon="Check" @click="savePerson">保存</el-button>
         </div>
       </template>
     </el-drawer>
 
     <!-- AI 生成对话框 -->
-    <el-dialog v-model="aiVisible" title="AI 生成角色" width="560px">
+    <el-dialog v-model="aiVisible" title="AI 生成人物" width="560px">
       <el-form label-width="80px">
         <el-form-item label="背景设定">
           <el-input v-model="aiForm.setup" type="textarea" :rows="5" placeholder="世界观、主线、人物需求等。留空则使用项目简介" />
@@ -227,6 +227,7 @@ import { Characters, Prompts } from '@/services/db'
 import * as ai from '@/services/ai'
 import type { Character } from '@/types'
 
+// 注：后端 db 集合仍叫 characters，前端类型仍叫 Character，仅 UI 改名为"人物库"
 const projectStore = useProjectStore()
 const settings = useSettingsStore()
 const project = computed(() => projectStore.current)
@@ -240,12 +241,12 @@ const current = ref<Character | null>(null)
 const aliasInput = ref('')
 const tagInput = ref('')
 
-const characters = computed(() => projectStore.characters)
+const people = computed(() => projectStore.characters)
 const roles: Character['role'][] = ['主角', '配角', '反派', '龙套', '其他']
 
 const filtered = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
-  return characters.value.filter(c => {
+  return people.value.filter(c => {
     if (filterRole.value && c.role !== filterRole.value) return false
     if (!kw) return true
     return (
@@ -261,13 +262,12 @@ const aiGenerating = ref(false)
 const aiForm = ref({ setup: '', count: 3, model: '' })
 
 watch(models, (ms) => {
-  // try/catch 兜底：settings 未就绪或 apiKeys 缺失时，availableModels() 可能抛错
   try {
     if (!aiForm.value.model && Array.isArray(ms) && ms.length > 0) {
       aiForm.value.model = ms[0].model
     }
   } catch (e) {
-    console.error('[Characters] watch models error:', e)
+    console.error('[People] watch models error:', e)
   }
 }, { immediate: true })
 
@@ -287,8 +287,8 @@ function onEditorClose() {
   tagInput.value = ''
 }
 
-function otherCharacters(excludeId: string) {
-  return characters.value.filter(c => c.id !== excludeId)
+function otherPeople(excludeId: string) {
+  return people.value.filter(c => c.id !== excludeId)
 }
 
 function addAlias() {
@@ -314,17 +314,17 @@ function addRelation() {
 
 function onRelTargetChange(targetId: string, i: number) {
   if (!current.value) return
-  const t = characters.value.find(c => c.id === targetId)
+  const t = people.value.find(c => c.id === targetId)
   if (t) current.value.relationships[i].targetName = t.name
 }
 
-async function createCharacter() {
+async function createPerson() {
   loading.value = true
   try {
     const now = Date.now()
     const c = await Characters.save({
       projectId: project.value!.id,
-      name: '新角色',
+      name: '新人物',
       aliases: [],
       role: '配角',
       age: '',
@@ -342,7 +342,7 @@ async function createCharacter() {
     } as any)
     await projectStore.reloadAll()
     openEditor(c)
-    ElMessage.success('已创建角色')
+    ElMessage.success('已创建人物')
   } catch (e: any) {
     ElMessage.error('创建失败：' + e.message)
   } finally {
@@ -350,10 +350,10 @@ async function createCharacter() {
   }
 }
 
-async function saveChar() {
+async function savePerson() {
   if (!current.value) return
   if (!current.value.name.trim()) {
-    ElMessage.warning('请填写角色姓名')
+    ElMessage.warning('请填写人物姓名')
     return
   }
   loading.value = true
@@ -370,11 +370,11 @@ async function saveChar() {
   }
 }
 
-async function removeChar() {
+async function removePerson() {
   const id = current.value?.id
   if (!id) return
   try {
-    await ElMessageBox.confirm(`删除角色「${current.value!.name}」？此操作不可恢复。`, '确认删除', { type: 'warning' })
+    await ElMessageBox.confirm(`删除人物「${current.value!.name}」？此操作不可恢复。`, '确认删除', { type: 'warning' })
   } catch {
     return
   }
@@ -425,9 +425,9 @@ async function doAiGenerate() {
       messages: [{ role: 'user', content }],
       temperature: 0.85
     }))
-    const parsed = parseCharacters(text)
+    const parsed = parsePeople(text)
     if (parsed.length === 0) {
-      ElMessage.warning('未能从 AI 返回中解析出角色，请重试或手动创建')
+      ElMessage.warning('未能从 AI 返回中解析出人物，请重试或手动创建')
       return
     }
     const now = Date.now()
@@ -453,7 +453,7 @@ async function doAiGenerate() {
       } as any)
     }
     await projectStore.reloadAll()
-    ElMessage.success(`已生成 ${parsed.length} 个角色`)
+    ElMessage.success(`已生成 ${parsed.length} 个人物`)
     aiVisible.value = false
   } catch (e: any) {
     ElMessage.error('生成失败：' + e.message)
@@ -462,7 +462,7 @@ async function doAiGenerate() {
   }
 }
 
-function parseCharacters(text: string) {
+function parsePeople(text: string) {
   const results: any[] = []
   let cur: any = null
 
@@ -476,17 +476,17 @@ function parseCharacters(text: string) {
   }
 
   const fieldMap: Record<string, string> = {
-    '姓名': 'name', '名字': 'name', '名称': 'name', '角色名': 'name',
+    '姓名': 'name', '名字': 'name', '名称': 'name', '人物名': 'name', '角色名': 'name',
     '别名': 'aliases', '外号': 'aliases', '曾用名': 'aliases', '别名/外号': 'aliases',
-    '角色类型': 'role', '类型': 'role', '身份': 'role', '定位': 'role', '角色定位': 'role',
+    '人物类型': 'role', '类型': 'role', '身份': 'role', '定位': 'role', '角色定位': 'role', '角色类型': 'role',
     '年龄': 'age',
     '性别': 'gender',
     '外貌': 'appearance', '外貌特征': 'appearance', '形象': 'appearance', '相貌': 'appearance', '外貌/形象': 'appearance',
     '性格': 'personality', '性格特点': 'personality', '性格特征': 'personality',
     '背景': 'background', '身世': 'background', '背景设定': 'background', '身世背景': 'background', '背景故事': 'background',
     '能力': 'abilities', '技能': 'abilities', '特长': 'abilities', '本领': 'abilities', '能力/技能': 'abilities',
-    '目标': 'goals', '角色目标': 'goals', '动机': 'goals',
-    '弧线': 'arc', '角色弧线': 'arc', '成长弧线': 'arc', '成长': 'arc',
+    '目标': 'goals', '人物目标': 'goals', '动机': 'goals',
+    '弧线': 'arc', '人物弧线': 'arc', '成长弧线': 'arc', '成长': 'arc', '角色弧线': 'arc',
     '标签': 'tags', '关键词': 'tags'
   }
 
@@ -573,21 +573,20 @@ function formatTime(ts: number) {
 @keyframes rotate {
   to { transform: rotate(360deg); }
 }
-/* 内容 wrapper：始终渲染，承载 v-loading */
 .content-wrapper {
   min-height: 200px;
 }
 
-/* 角色卡片网格 */
-.char-grid {
+/* 人物卡片网格 */
+.people-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 14px;
 }
-.char-card {
+.person-card {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 14px;
   cursor: pointer;
   transition: all 0.18s ease;
@@ -595,7 +594,7 @@ function formatTime(ts: number) {
   flex-direction: column;
   gap: 10px;
 }
-.char-card:hover {
+.person-card:hover {
   border-color: var(--primary);
   transform: translateY(-2px);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
@@ -625,7 +624,7 @@ function formatTime(ts: number) {
   flex: 1;
   min-width: 0;
 }
-.char-name {
+.person-name {
   font-size: 15px;
   font-weight: 600;
   margin-bottom: 4px;

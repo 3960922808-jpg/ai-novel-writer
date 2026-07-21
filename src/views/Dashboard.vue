@@ -29,7 +29,7 @@
         <div class="text-faint text-xs">已完成 {{ completedChapters }} 章</div>
       </div>
       <div class="stat-card card">
-        <div class="stat-label">角色数</div>
+        <div class="stat-label">人物数</div>
         <div class="stat-value">{{ projectStore.characters.length }}</div>
         <div class="text-faint text-xs">{{ projectStore.locations.length }} 个地点</div>
       </div>
@@ -69,14 +69,14 @@
         </div>
       </div>
 
-      <!-- 最近角色 -->
+      <!-- 最近人物 -->
       <div class="card" style="padding: 16px">
         <div class="flex justify-between items-center" style="margin-bottom: 12px">
-          <h3 style="margin:0; font-size:15px">主要角色</h3>
-          <el-button text size="small" @click="$router.push({ name: 'characters' })">管理 →</el-button>
+          <h3 style="margin:0; font-size:15px">主要人物</h3>
+          <el-button text size="small" @click="$router.push({ name: 'people' })">管理 →</el-button>
         </div>
         <div v-if="projectStore.characters.length === 0" class="empty" style="padding: 24px">
-          <p class="text-faint">还没有角色</p>
+          <p class="text-faint">还没有人物</p>
         </div>
         <div v-else class="char-grid">
           <div v-for="c in projectStore.characters.slice(0, 6)" :key="c.id" class="char-item">

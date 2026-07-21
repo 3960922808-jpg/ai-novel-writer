@@ -115,9 +115,9 @@
                   <el-icon class="tree-icon"><Collection /></el-icon>
                   <span class="tree-label">设定</span>
                 </div>
-                <div class="tree-row leaf-row" @click="$router.push({ name: 'characters' })">
+                <div class="tree-row leaf-row" @click="$router.push({ name: 'people' })">
                   <el-icon class="tree-icon"><User /></el-icon>
-                  <span class="tree-label">角色</span>
+                  <span class="tree-label">人物</span>
                 </div>
                 <div class="tree-row leaf-row" @click="$router.push({ name: 'lore' })">
                   <el-icon class="tree-icon"><Files /></el-icon>
@@ -272,20 +272,46 @@
                   已选择 {{ String.fromCharCode(65 + msg.selectedOption) }}，继续生成中...
                 </div>
               </div>
-              <!-- 普通消息 -->
-              <div v-else class="chat-msg-content" v-html="renderMessage(msg.content)"></div>
-              <div class="chat-msg-actions" v-if="msg.role === 'assistant' && msg.content && !msg.options">
-                <el-button text size="small" :icon="DocumentCopy" @click="copyText(msg.content)">复制</el-button>
-                <el-button text size="small" :icon="Plus" @click="appendOutput(msg.content)">追加到正文</el-button>
-                <!-- 卡壳时主动让 AI 提问 -->
-                <el-button text size="small" :icon="QuestionFilled" @click="askAiToQuestion(msg)">让 AI 提问</el-button>
+              <!-- AI 普通输出：圆角长方形卡片 -->
+              <div v-else-if="msg.role === 'assistant' && msg.content" class="ai-output-card">
+                <!-- 顶部右上角操作按钮 -->
+                <div class="ai-output-top">
+                  <div class="ai-output-actions top-actions">
+                    <button class="ai-act-btn" title="替换正文" @click="replaceOutput(msg.content)">
+                      <el-icon><Switch /></el-icon>
+                    </button>
+                    <button class="ai-act-btn" title="追加到正文" @click="appendOutput(msg.content)">
+                      <el-icon><DocumentAdd /></el-icon>
+                    </button>
+                  </div>
+                </div>
+                <!-- 内容区 -->
+                <div class="ai-output-content" v-html="renderMessage(msg.content)"></div>
+                <!-- 底部图标按钮（无文字） -->
+                <div class="ai-output-actions bottom-actions">
+                  <button class="ai-act-btn" title="重新生成" @click="regenerateMsg(i)" :disabled="generating">
+                    <el-icon><Refresh /></el-icon>
+                  </button>
+                  <button class="ai-act-btn" title="删除" @click="deleteMsg(i)">
+                    <el-icon><Delete /></el-icon>
+                  </button>
+                  <button class="ai-act-btn" title="复制" @click="copyText(msg.content)">
+                    <el-icon><DocumentCopy /></el-icon>
+                  </button>
+                </div>
               </div>
+              <!-- 用户消息 -->
+              <div v-else class="chat-msg-content" v-html="renderMessage(msg.content)"></div>
             </div>
             <div v-if="generating" class="chat-msg assistant">
               <div class="chat-msg-role">AI</div>
-              <div class="chat-msg-content streaming">{{ aiStreamingText }}<span class="cursor">▌</span></div>
-              <div class="chat-msg-actions">
-                <el-button text size="small" type="danger" :icon="VideoPause" @click="stopGenerate">停止生成</el-button>
+              <div class="ai-output-card streaming-card">
+                <div class="ai-output-content streaming">{{ aiStreamingText }}<span class="cursor">▌</span></div>
+                <div class="ai-output-actions bottom-actions">
+                  <button class="ai-act-btn danger" title="停止生成" @click="stopGenerate">
+                    <el-icon><VideoPause /></el-icon>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -328,7 +354,7 @@
             ref="inputRef"
             v-model="userInput"
             class="chat-input"
-            placeholder="请输入指令，输入 @ 关联角色/地点/设定/章节，输入 / 触发技能"
+            placeholder="请输入指令，输入 @ 关联人物/地点/设定/章节，输入 / 触发技能"
             rows="4"
             @input="onInput"
             @keydown="onKeydown"
@@ -433,8 +459,9 @@ import {
   ArrowLeft, ArrowRight, ArrowDown, ArrowRight as Right, Back, Search, Plus,
   Document, Checked, Brush, Warning, Grid, Timer, Clock, Folder, Collection,
   User, Files, DataAnalysis, Connection, Upload, Download, Loading,
-  DocumentCopy, Microphone, Delete, CopyDocument, MagicStick, RefreshLeft,
-  RefreshRight, ChatLineRound, List, ChatDotRound, Link, Promotion,
+  DocumentCopy, DocumentAdd, Microphone, Delete, CopyDocument, MagicStick,
+  RefreshLeft, RefreshRight, Refresh, Switch,
+  ChatLineRound, List, ChatDotRound, Link, Promotion,
   Star, DArrowLeft, DArrowRight, QuestionFilled, ChatLineSquare,
   Location as LocationIcon, Reading, VideoPause
 } from '@element-plus/icons-vue'
@@ -683,7 +710,7 @@ function buildContext(): string {
   const tail = currentText.slice(-1500)
   const chars = projectStore.characters.slice(0, 10).map(c => `${c.name}(${c.role})：${c.personality?.slice(0, 50) || ''}`).join('；')
   const lore = projectStore.lore.slice(0, 8).map(l => `${l.category}/${l.title}：${l.content?.slice(0, 60) || ''}`).join('；')
-  return `【作品信息】\n类型：${project.value.genre}\n标题：${project.value.title}\n简介：${project.value.description}\n\n【前情摘要】\n${recentSummaries}\n\n【角色】${chars}\n\n【设定】${lore}\n\n【当前章节】\n第${chapter.value.order}章《${chapter.value.title}》\n${tail}`
+  return `【作品信息】\n类型：${project.value.genre}\n标题：${project.value.title}\n简介：${project.value.description}\n\n【前情摘要】\n${recentSummaries}\n\n【人物】${chars}\n\n【设定】${lore}\n\n【当前章节】\n第${chapter.value.order}章《${chapter.value.title}》\n${tail}`
 }
 
 // ===== AI 对话面板 =====
@@ -773,7 +800,7 @@ const slashKeyword = ref('')
 
 // @ 关联菜单
 interface AtMatch {
-  type: string       // 角色/地点/设定/章节
+  type: string       // 人物/地点/设定/章节
   label: string      // 显示名
   preview: string    // 描述前 60 字
   content: string    // 完整内容（关联时塞入）
@@ -793,7 +820,7 @@ const filteredSkills = computed(() => {
 })
 
 /**
- * 解析输入框中的 @ 关键词，匹配项目内角色/地点/设定/章节
+ * 解析输入框中的 @ 关键词，匹配项目内人物/地点/设定/章节
  * 触发条件：光标前最近一个 @ 后没有空格，且 @ 后字符长度 > 0
  */
 function detectAtKeyword(text: string, caret: number): string {
@@ -814,14 +841,14 @@ function buildAtMatches(keyword: string): AtMatch[] {
   const matches: AtMatch[] = []
   const filter = (s: string) => !kw || s.toLowerCase().includes(kw)
 
-  // 角色
+  // 人物
   for (const c of projectStore.characters) {
     if (!filter(c.name)) continue
     matches.push({
-      type: '角色',
+      type: '人物',
       label: c.name,
       preview: `${c.role} · ${(c.personality || '无描述').slice(0, 50)}`,
-      content: `【角色：${c.name}】\n身份：${c.role}\n性别：${c.gender || '未设定'}\n年龄：${c.age || '未设定'}\n外貌：${c.appearance || '无'}\n性格：${c.personality || '无'}\n背景：${c.background || '无'}\n能力：${c.abilities || '无'}\n目标：${c.goals || '无'}\n弧线：${c.arc || '无'}`,
+      content: `【人物：${c.name}】\n身份：${c.role}\n性别：${c.gender || '未设定'}\n年龄：${c.age || '未设定'}\n外貌：${c.appearance || '无'}\n性格：${c.personality || '无'}\n背景：${c.background || '无'}\n能力：${c.abilities || '无'}\n目标：${c.goals || '无'}\n弧线：${c.arc || '无'}`,
       icon: User
     })
   }
@@ -1317,6 +1344,53 @@ function appendOutput(text: string) {
     editor.value.commands.insertContent(`<p>${escapeHtml(p)}</p>`)
   }
   ElMessage.success('已追加到正文')
+}
+
+/** 替换正文：清空编辑器当前内容，用 AI 输出替换 */
+function replaceOutput(text: string) {
+  if (!editor.value || !text) return
+  // 先清空，再插入新内容
+  editor.value.commands.clearContent()
+  const paras = text.split(/\n+/).filter(p => p.trim())
+  for (const p of paras) {
+    editor.value.commands.insertContent(`<p>${escapeHtml(p)}</p>`)
+  }
+  ElMessage.success('已替换正文')
+}
+
+/** 删除某条消息 */
+function deleteMsg(index: number) {
+  if (index < 0 || index >= chatMessages.value.length) return
+  chatMessages.value.splice(index, 1)
+}
+
+/** 重新生成：找到对应的用户消息，把它重新塞回输入框并触发发送，同时删除当前 AI 消息 */
+async function regenerateMsg(index: number) {
+  if (generating.value) return
+  if (index < 0 || index >= chatMessages.value.length) return
+  // 向前找最近的 user 消息
+  let userIdx = -1
+  for (let i = index - 1; i >= 0; i--) {
+    if (chatMessages.value[i].role === 'user') {
+      userIdx = i
+      break
+    }
+  }
+  if (userIdx < 0) {
+    ElMessage.warning('未找到对应的用户指令，无法重新生成')
+    return
+  }
+  const userMsg = chatMessages.value[userIdx]
+  // 提取原始指令文本（去掉技能前缀）
+  let rawInput = userMsg.content || ''
+  const skillMatch = rawInput.match(/^\[技能：[^\]]+\]\s*\n?([\s\S]*)$/)
+  if (skillMatch) rawInput = skillMatch[1]
+  // 删除从 user 消息到当前 AI 消息之间的所有消息
+  chatMessages.value.splice(userIdx, index - userIdx + 1)
+  // 重新填入输入框触发发送
+  userInput.value = rawInput
+  await nextTick()
+  sendChat()
 }
 
 function escapeHtml(s: string) {
@@ -2016,11 +2090,13 @@ html.dark .tb-sep { background: #334155; }
   color: #2d3748;
   margin-left: 20px;
 }
+/* AI 消息容器本身不设背景，让内部 .ai-output-card 自己控制视觉 */
 .chat-msg.assistant {
-  background: #f7fafc;
+  background: transparent;
   color: #2d3748;
-  margin-right: 20px;
-  border: 1px solid #edf2f7;
+  margin-right: 0;
+  border: none;
+  padding: 4px 0;
 }
 .chat-msg-role {
   font-size: 11px;
@@ -2040,6 +2116,86 @@ html.dark .tb-sep { background: #334155; }
   padding-top: 6px;
   border-top: 1px dashed #e2e8f0;
 }
+
+/* ===== AI 输出圆角长方形卡片 ===== */
+.ai-output-card {
+  background: linear-gradient(180deg, #f8faff 0%, #f1f5fb 100%);
+  border: 1px solid #dbe5f3;
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.05);
+  transition: box-shadow 0.18s ease, border-color 0.18s ease;
+}
+.ai-output-card:hover {
+  border-color: #bcd0f5;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.1);
+}
+.ai-output-card.streaming-card {
+  background: #fafbff;
+  border-color: #c7d6f5;
+}
+.ai-output-top {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-height: 20px;
+}
+.ai-output-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #2d3748;
+  padding: 4px 2px;
+}
+.ai-output-content.streaming { color: #4a5568; }
+
+/* ===== AI 输出操作按钮（仅图标，无文字） ===== */
+.ai-output-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.ai-output-actions.top-actions {
+  gap: 2px;
+}
+.ai-output-actions.bottom-actions {
+  padding-top: 6px;
+  border-top: 1px dashed #e2e8f0;
+  margin-top: 2px;
+}
+.ai-act-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: #718096;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  padding: 0;
+}
+.ai-act-btn:hover:not(:disabled) {
+  background: #2563eb;
+  color: #fff;
+}
+.ai-act-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.ai-act-btn.danger:hover:not(:disabled) {
+  background: #ef4444;
+}
+.ai-act-btn .el-icon {
+  font-size: 14px;
+}
+
 .cursor { animation: blink 1s infinite; color: #2563eb; }
 @keyframes blink { 50% { opacity: 0; } }
 
