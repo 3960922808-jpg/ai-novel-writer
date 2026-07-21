@@ -48,6 +48,16 @@
             <el-option label="楷体" value="楷体" />
           </el-select>
         </el-form-item>
+
+        <el-form-item label="界面缩放">
+          <div class="slider-row">
+            <el-slider v-model="form.zoomLevel" :min="70" :max="150" :step="10" style="flex: 1" @input="onZoomChange" />
+            <span class="slider-val">{{ form.zoomLevel }}%</span>
+          </div>
+          <span class="text-faint text-xs" style="display:block; margin-top:2px">
+            像浏览器一样整体缩放界面（70%-150%），切换立即生效
+          </span>
+        </el-form-item>
       </div>
 
       <div class="card section-card">
@@ -239,7 +249,8 @@ const form = reactive<AppSettings>({
   searchApiKey: '',
   autoUpdateCheck: true,
   lastCommitSha: '',
-  askMode: 'auto'
+  askMode: 'auto',
+  zoomLevel: 100
 })
 
 const modelOptions = computed(() => settingsStore.availableModels())
@@ -332,6 +343,8 @@ function fillForm(s: AppSettings) {
   }
   // askMode 兼容
   if (!form.askMode) form.askMode = 'auto'
+  // zoomLevel 兼容
+  if (form.zoomLevel === undefined || form.zoomLevel === null) form.zoomLevel = 100
 }
 
 function onThemeChange() {
@@ -342,6 +355,11 @@ function onThemeChange() {
 function onFontChange() {
   // 字体大小/编辑器字体实时预览
   settingsStore.update({ fontSize: form.fontSize, editorFont: form.editorFont })
+}
+
+function onZoomChange() {
+  // 界面缩放实时生效（像浏览器一样）
+  settingsStore.update({ zoomLevel: form.zoomLevel })
 }
 
 function showModelInput(idx: number) {
@@ -387,7 +405,8 @@ async function save() {
       dataDir: form.dataDir,
       searchProvider: form.searchProvider,
       searchApiKey: form.searchApiKey,
-      autoUpdateCheck: form.autoUpdateCheck
+      autoUpdateCheck: form.autoUpdateCheck,
+      zoomLevel: form.zoomLevel
     })
     ElMessage.success('已保存')
   } catch (e: any) {

@@ -22,7 +22,7 @@
       </div>
 
       <div class="update-tip-block">
-        <div class="update-tip-row">📦 安装包：<code>{{ updateInfo?.downloadName || 'AI-Novel-Writer-Setup.exe' }}</code></div>
+        <div class="update-tip-row">📦 安装包：<code>{{ updateInfo?.downloadName || 'TrmWrite-Setup.exe' }}</code></div>
         <div class="update-tip-row">⬇ 大小：{{ updateInfo?.downloadSize ? (updateInfo.downloadSize / 1024 / 1024).toFixed(1) + ' MB' : '未知' }}</div>
       </div>
 

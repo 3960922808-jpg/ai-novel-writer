@@ -1,6 +1,6 @@
-# AI 写小说 · Windows 桌面版
+# TrmWrite · Windows 桌面版
 
-对标 GitHub [OpenWrite](https://github.com/ilrein/openwrite) 的全功能 AI 长篇小说创作工作台，基于 Electron + Vue 3。
+AI 长篇小说创作工作台，基于 Electron + Vue 3。
 
 ## 🚀 快速开始（Windows）
 
@@ -28,7 +28,7 @@ npm run dev:electron
 npm run build:win
 ```
 
-打包完成后，`release\` 目录里会有 **`AI写小说 Setup 1.0.0.exe`**，双击即可安装。
+打包完成后，`release\` 目录里会有 **`TrmWrite Setup 1.0.0.exe`**，双击即可安装。
 
 ## 📖 使用流程
 

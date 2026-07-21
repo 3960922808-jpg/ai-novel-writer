@@ -36,7 +36,7 @@ export function registerAIIPC() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${req.apiKey}`,
           'HTTP-Referer': 'https://github.com/ainovelwriter',
-          'X-Title': 'AI Novel Writer'
+          'X-Title': 'TrmWrite'
         },
         body: JSON.stringify(body),
         signal: ctrl.signal

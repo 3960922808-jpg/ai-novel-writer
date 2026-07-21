@@ -4,7 +4,7 @@
     <aside class="sidebar" :class="{ collapsed }">
       <div class="logo" @click="goHome">
         <el-icon :size="22"><EditPen /></el-icon>
-        <span v-if="!collapsed" class="logo-text">AI 写小说</span>
+        <span v-if="!collapsed" class="logo-text">TrmWrite</span>
       </div>
 
       <div class="project-info" v-if="project && !collapsed">

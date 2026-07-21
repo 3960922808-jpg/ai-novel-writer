@@ -7,7 +7,7 @@
 # This script will:
 #   - Read version from package.json
 #   - Create a GitHub Release tagged v<version> (updates if exists)
-#   - Upload Setup.exe and win-unpacked/AI写小说.exe as release assets
+#   - Upload Setup.exe and win-unpacked/TrmWrite.exe as release assets
 
 $ErrorActionPreference = 'Stop'
 
@@ -32,8 +32,8 @@ $headers = @{
 }
 
 # Locate packaged files
-$setupExe = Join-Path $PSScriptRoot "release\AI写小说 Setup $version.exe"
-$unpackedExe = Join-Path $PSScriptRoot 'release\win-unpacked\AI写小说.exe'
+$setupExe = Join-Path $PSScriptRoot "release\TrmWrite Setup $version.exe"
+$unpackedExe = Join-Path $PSScriptRoot 'release\win-unpacked\TrmWrite.exe'
 
 $assets = @()
 if (Test-Path $setupExe) {
@@ -65,8 +65,8 @@ try {
 if (-not $release) {
   $body = @{
     tag_name    = $tagName
-    name        = "AI 写小说 $version"
-    body        = "版本 $version 发布。`n`n- 安装包：双击 Setup.exe 安装`n- 免安装版：直接运行 AI写小说.exe"
+    name        = "TrmWrite $version"
+    body        = "版本 $version 发布。`n`n- 安装包：双击 Setup.exe 安装`n- 免安装版：直接运行 TrmWrite.exe"
     draft       = $false
     prerelease  = $false
   } | ConvertTo-Json

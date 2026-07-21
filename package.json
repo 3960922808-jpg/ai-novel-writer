@@ -1,8 +1,8 @@
 {
-  "name": "ai-novel-writer",
-  "version": "1.2.0",
-  "description": "AI 写小说 - Windows 桌面版（对标 OpenWrite 全功能）",
-  "author": "AI Novel Writer",
+  "name": "trmwrite",
+  "version": "1.3.0",
+  "description": "TrmWrite - Windows 桌面版（AI 写小说创作助手）",
+  "author": "TrmWrite",
   "main": "dist-electron/main.js",
   "type": "module",
   "scripts": {
@@ -49,7 +49,7 @@
   "build": {
     "appId": "com.ainovelwriter.app",
     "icon": "build/icon.png",
-    "productName": "AI写小说",
+    "productName": "TrmWrite",
     "directories": {
       "output": "release"
     },
@@ -74,7 +74,7 @@
           "arch": ["x64"]
         }
       ],
-      "artifactName": "AI-Novel-Writer-${version}-${arch}.${ext}"
+      "artifactName": "TrmWrite-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": true,
@@ -82,10 +82,10 @@
       "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "AI写小说",
+      "shortcutName": "TrmWrite",
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
-      "artifactName": "AI-Novel-Writer-Setup-${version}.${ext}"
+      "artifactName": "TrmWrite-Setup-${version}.${ext}"
     }
   }
 }

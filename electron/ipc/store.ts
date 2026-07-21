@@ -135,7 +135,8 @@ export function registerStoreIPC() {
         searchProvider: 'duckduckgo',
         searchApiKey: '',
         autoUpdateCheck: true,
-        lastCommitSha: ''
+        lastCommitSha: '',
+        zoomLevel: 100
       }
       await db.write()
     }
@@ -148,8 +149,11 @@ export function registerStoreIPC() {
       db.data.settings.autoUpdateCheck = true
       db.data.settings.lastCommitSha = ''
     }
+    if (db.data.settings && db.data.settings.zoomLevel === undefined) {
+      db.data.settings.zoomLevel = 100
+    }
     if (db.data.settings) {
-      if (!('searchProvider' in db.data.settings) || db.data.settings.autoUpdateCheck === undefined) {
+      if (!('searchProvider' in db.data.settings) || db.data.settings.autoUpdateCheck === undefined || db.data.settings.zoomLevel === undefined) {
         await db.write()
       }
     }

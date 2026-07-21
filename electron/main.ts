@@ -49,7 +49,7 @@ function createWindow() {
     minHeight: 680,
     show: false,
     backgroundColor: '#1a1a1a',
-    title: 'AI 写小说',
+    title: 'TrmWrite',
     icon: iconPath,
     autoHideMenuBar: true, // 隐藏菜单栏（按 Alt 仍可临时显示）
     webPreferences: {

@@ -111,11 +111,14 @@ export interface TimelineEvent {
   createdAt: number
 }
 
-/** 故事画布节点 */
+/** 故事画布节点（工作流语义：AI 可按此顺序生成故事） */
 export interface CanvasNode {
   id: ID
   projectId: ID
-  type: 'scene' | 'plot' | 'character' | 'theme' | 'note'
+  /** 节点类型：原 5 种基础类型 + 5 种工作流类型 */
+  type:
+    | 'scene' | 'plot' | 'character' | 'theme' | 'note'
+    | 'start' | 'inciting' | 'rising' | 'climax' | 'resolution'
   x: number
   y: number
   width: number
@@ -125,6 +128,10 @@ export interface CanvasNode {
   color: string
   links: ID[] // 连接的其他节点
   createdAt: number
+  /** AI 提示词：告诉 AI 这个节点要写什么（工作流核心字段） */
+  aiPrompt?: string
+  /** 工作流顺序号：按此排序生成章节 */
+  order?: number
 }
 
 /** 提示词 */
@@ -204,6 +211,8 @@ export interface AppSettings {
   askMode: 'auto' | 'always' | 'never'
   // 主题模式：light/dark/auto（auto 跟随系统）
   themeMode?: 'light' | 'dark' | 'auto'
+  // 界面缩放（百分比，70-150，类似浏览器缩放）
+  zoomLevel?: number
 }
 
 /** Skill（技能）— 比普通提示词更高级的 AI 工作流 */

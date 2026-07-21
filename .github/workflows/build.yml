@@ -89,7 +89,7 @@ jobs:
       - name: 上传构建产物到 Action Artifacts（备份）
         uses: actions/upload-artifact@v4
         with:
-          name: AI写小说-${{ steps.version.outputs.ver }}
+          name: TrmWrite-${{ steps.version.outputs.ver }}
           path: |
             release/*.zip
             release/*.exe
@@ -100,9 +100,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: AI写小说 ${{ steps.version.outputs.tag }}
+          name: TrmWrite ${{ steps.version.outputs.tag }}
           body: |
-            # AI写小说 ${{ steps.version.outputs.tag }}
+            # TrmWrite ${{ steps.version.outputs.tag }}
 
             ## 🎉 主要功能
 
@@ -141,14 +141,14 @@ jobs:
             ## 📥 下载说明
 
             ### 方式一：解压即用（推荐，无需安装）
-            1. 下载 `AI-Novel-Writer-${{ steps.version.outputs.ver }}-x64.zip`
-            2. 解压到任意目录（如 `D:\AI写小说`）
-            3. 双击解压出来的 `AI写小说.exe` 直接运行，无需安装
+            1. 下载 `TrmWrite-${{ steps.version.outputs.ver }}-x64.zip`
+            2. 解压到任意目录（如 `D:\TrmWrite`）
+            3. 双击解压出来的 `TrmWrite.exe` 直接运行，无需安装
 
             ### 方式二：安装版
-            1. 下载 `AI-Novel-Writer-Setup-${{ steps.version.outputs.ver }}.exe`
+            1. 下载 `TrmWrite-Setup-${{ steps.version.outputs.ver }}.exe`
             2. 双击运行，按提示完成安装
-            3. 安装完成后，桌面会出现「AI写小说」快捷方式
+            3. 安装完成后，桌面会出现「TrmWrite」快捷方式
 
             ## 🔧 使用前准备
             - 首次启动后，进入「设置」页面配置 AI API Key
@@ -158,6 +158,8 @@ jobs:
             https://github.com/3960922808-jpg/ai-novel-writer
 
             ## 📝 更新历史
+            - v1.3.x：界面缩放设置 + 故事画布升级为 AI 工作流 + 品牌更名为 TrmWrite
+            - v1.2.x：所有页面添加返回按钮
             - v1.1.x：AI 提问 ABCD + @ 关联 + 主题优化 + 智能提问 + 更新优化 + 章节概要收起 + 图标修复 + 去菜单栏 + 删除项目修复 + 保存修复 + 网络重试
             - v1.0.x：解压即用 + GitHub Actions 自动打包 + NSIS 安装版
           files: |

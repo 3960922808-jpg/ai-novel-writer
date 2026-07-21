@@ -151,7 +151,7 @@ function notifyUpdate(release: GitHubRelease) {
   // 1. 系统原生通知
   if (Notification.isSupported()) {
     const notif = new Notification({
-      title: 'AI 写小说 · 发现新版本',
+      title: 'TrmWrite · 发现新版本',
       body: `${release.name || release.tag_name}\n点击立即更新`,
       silent: false
     })

@@ -90,7 +90,7 @@ export function registerExportIPC() {
     const epub = new EPub(
       {
         title: project.title,
-        author: 'AI 写小说',
+        author: 'TrmWrite',
         description: project.description || ''
       },
       sections
