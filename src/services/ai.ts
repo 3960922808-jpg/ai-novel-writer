@@ -3,7 +3,11 @@ import type { AIRequest, ChatMessage } from '@/types'
 
 /** 流式调用，onChunk 接收增量文本，返回完整文本 */
 export function streamChat(req: AIRequest, onChunk: (text: string) => void): Promise<string> {
-  return window.api.ai.stream(req, onChunk)
+  // window.api.ai.stream 返回 { promise, cancel }，这里保持向后兼容只返回 promise
+  const ret = window.api.ai.stream(req, onChunk)
+  // 兼容两种返回形态
+  if (ret && typeof (ret as any).then === 'function') return ret as unknown as Promise<string>
+  return (ret as any).promise as Promise<string>
 }
 
 /** 非流式调用 */

@@ -13,7 +13,7 @@ export function registerStoreIPC() {
   // ====== 项目 ======
   ipcMain.handle('store:projects:list', async () => {
     const db = getDB()
-    return db.data.projects.sort((a, b) => b.updatedAt - a.updatedAt)
+    return db.data.projects.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
   })
 
   ipcMain.handle('store:project:get', async (_e, id: string) => {
@@ -44,10 +44,24 @@ export function registerStoreIPC() {
     if (Array.isArray(db.data.projects)) {
       db.data.projects = db.data.projects.filter(p => p.id !== id)
     }
+    // 收集该项目所有 chapterId，用于清理 versions（versions 无 projectId，只有 chapterId）
+    const chapterIds = new Set(
+      Array.isArray(db.data.chapters)
+        ? db.data.chapters.filter(c => c.projectId === id).map(c => c.id)
+        : []
+    )
     // 级联删除所有关联集合
     for (const c of COLLECTIONS) {
       const arr = (db.data as any)[c]
-      if (Array.isArray(arr)) {
+      if (!Array.isArray(arr)) continue
+      if (c === 'versions') {
+        // versions 没有 projectId，用 chapterId 关联
+        ;(db.data as any)[c] = arr.filter((x: any) => !chapterIds.has(x.chapterId))
+      } else if (c === 'critiques') {
+        // critiques 有 projectId 和 chapterId，按 projectId 删，再按死引用 chapterId 删
+        ;(db.data as any)[c] = arr.filter((x: any) =>
+          x.projectId !== id && !chapterIds.has(x.chapterId))
+      } else {
         ;(db.data as any)[c] = arr.filter((x: any) => x.projectId !== id)
       }
     }
@@ -69,12 +83,14 @@ export function registerStoreIPC() {
   })
 
   ipcMain.handle('store:collection:get', async (_e, collection: string, id: string) => {
+    if (!COLLECTIONS.includes(collection) && collection !== 'projects') return null
     const db = getDB()
     const arr = (db.data as any)[collection] as any[]
     return arr?.find(x => x.id === id) || null
   })
 
   ipcMain.handle('store:collection:save', async (_e, collection: string, doc: any) => {
+    if (!COLLECTIONS.includes(collection) && collection !== 'projects') return null
     const db = getDB()
     const arr = (db.data as any)[collection] as any[]
     if (!arr) return null
@@ -89,6 +105,7 @@ export function registerStoreIPC() {
   })
 
   ipcMain.handle('store:collection:delete', async (_e, collection: string, id: string) => {
+    if (!COLLECTIONS.includes(collection) && collection !== 'projects') return false
     const db = getDB()
     const arr = (db.data as any)[collection] as any[]
     if (!arr) return false
@@ -99,6 +116,7 @@ export function registerStoreIPC() {
   })
 
   ipcMain.handle('store:collection:bulkSave', async (_e, collection: string, docs: any[]) => {
+    if (!COLLECTIONS.includes(collection) && collection !== 'projects') return []
     const db = getDB()
     const arr = (db.data as any)[collection] as any[]
     if (!arr) return []

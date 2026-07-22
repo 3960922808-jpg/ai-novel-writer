@@ -855,6 +855,8 @@ const chatMessages = ref<EditorChatMessage[]>([])
 const userInput = ref('')
 const aiStreamingText = ref('')
 const generating = ref(false)
+// 当前流式 AI 调用的 cancel 句柄（主进程 AbortController.abort() 用）
+let currentStreamCancel: (() => void) | null = null
 const stopFlag = ref(false)
 // 当前流式会话的 IPC channel，用于停止时通知主进程 abort fetch
 let currentStreamChan: string | null = null
@@ -1332,8 +1334,9 @@ async function sendChat() {
   generating.value = true
   aiStreamingText.value = ''
   stopFlag.value = false
+  currentStreamCancel = null
   try {
-    const full = await aiSvc.streamChat(
+    const ret = window.api.ai.stream(
       aiSvc.buildRequest({
         baseUrl: provider.baseUrl,
         apiKey: provider.apiKey,
@@ -1351,6 +1354,15 @@ async function sendChat() {
         aiStreamingText.value += chunk
       }
     )
+    if (ret && typeof (ret as any).cancel === 'function') {
+      currentStreamCancel = (ret as any).cancel
+    }
+    // window.api.ai.stream 返回 { promise, cancel }，await promise 拿到完整文本
+    const retObj = ret as { promise?: Promise<string>; cancel?: () => void } | Promise<string>
+    const isWrapper = retObj && typeof (retObj as any).promise === 'object' && typeof (retObj as any).cancel === 'function'
+    const full: string = isWrapper
+      ? await (retObj as { promise: Promise<string> }).promise
+      : await (retObj as Promise<string>)
     if (full) {
       // 解析 AI 输出是否包含 ===QUESTION===...===END=== 提问块
       const parsed = parseQuestionBlock(full)
@@ -1371,13 +1383,18 @@ async function sendChat() {
   } finally {
     generating.value = false
     aiStreamingText.value = ''
+    currentStreamCancel = null
   }
 }
 
 function stopGenerate() {
   // 设置 stopFlag 后，streamChat 的 onChunk 回调会立刻 return，不再累加 aiStreamingText
-  // 主进程的 fetch 流会继续（前端无法真正 abort），但 UI 不再更新，效果等同于停止
   stopFlag.value = true
+  // 通知主进程 AbortController.abort()，真正中止 fetch
+  if (currentStreamCancel) {
+    try { currentStreamCancel() } catch {}
+    currentStreamCancel = null
+  }
   generating.value = false
   aiStreamingText.value = ''
 }
@@ -2499,22 +2516,30 @@ html.dark .tb-sep { background: #334155; }
 }
 .chat-input {
   width: 100%;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border, #e2e8f0);
   border-radius: 6px;
   padding: 10px 12px;
   /* 右下方给浮动按钮让出空间，避免文字被按钮遮挡 */
-  padding-bottom: 44px;
+  padding-bottom: 48px;
   font-size: 14px;
   line-height: 1.65;
   resize: none;
   font-family: inherit;
   outline: none;
-  background: #ffffff;
-  color: #1a202c;
+  background: var(--panel, #ffffff);
+  color: var(--text, #1a202c);
   box-sizing: border-box;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
-.chat-input:focus { border-color: #2563eb; box-shadow: 0 0 0 2px #e6f0ff; }
+html.dark .chat-input {
+  background: #1e293b;
+  color: #f1f5f9;
+  border-color: #334155;
+}
+.chat-input:focus {
+  border-color: var(--primary, #2563eb);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
 
 /* 显眼的“发送需求”按钮（textarea 右下角浮动） */
 .send-demand-btn {
@@ -2534,7 +2559,7 @@ html.dark .tb-sep { background: #334155; }
   cursor: pointer;
   user-select: none;
   box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);
-  transition: transform 0.12s, box-shadow 0.12s, background 0.12s;
+  transition: transform 0.12s, box-shadow 0.12s, background 0.12s, opacity 0.12s;
   z-index: 2;
 }
 .send-demand-btn:hover:not(.disabled) {
@@ -2551,7 +2576,12 @@ html.dark .tb-sep { background: #334155; }
   cursor: not-allowed;
   box-shadow: none;
   color: #ffffff;
-  opacity: 0.85;
+  opacity: 0.55;
+}
+html.dark .send-demand-btn.disabled,
+html.dark .send-demand-btn:disabled {
+  background: #475569;
+  opacity: 0.5;
 }
 .send-demand-btn .loading-icon {
   animation: rotate 1s linear infinite;
@@ -2829,4 +2859,122 @@ html.dark .tb-sep { background: #334155; }
   padding: 4px 0 0;
   text-align: right;
 }
+
+/* ===== 深色主题覆盖（Editor.vue 内所有硬编码浅色样式） ===== */
+html.dark .editor-root { background: #0f172a; color: #f1f5f9; }
+html.dark .topbar { background: #1e293b; border-color: #334155; }
+html.dark .tb-icon-btn,
+html.dark .tb-fn-btn { background: transparent; color: #cbd5e0; }
+html.dark .tb-icon-btn:hover:not(:disabled),
+html.dark .tb-fn-btn:hover { background: #334155; color: #f1f5f9; }
+html.dark .tb-fn-btn.tb-fn-active,
+html.dark .tb-fn-btn.tb-fn-active:hover { background: var(--primary, #3b82c4); color: #fff; }
+html.dark .tb-fn-danger { color: #fca5a5 !important; }
+html.dark .tb-fn-danger:hover { background: #7f1d1d !important; color: #fecaca !important; }
+html.dark .word-count-pill { background: #334155; color: #cbd5e0; border-color: #475569; }
+
+html.dark .search-bar { background: #1e293b; border-color: #334155; }
+
+html.dark .left-panel,
+html.dark .right-panel { background: #1e293b; border-color: #334155; }
+html.dark .tree-section,
+html.dark .ai-analysis-section { background: transparent; }
+html.dark .tree-row:hover { background: #334155; }
+html.dark .tree-row.active { background: rgba(59, 130, 244, 0.18); color: #93c5fd; }
+html.dark .tree-icon,
+html.dark .tree-toggle { color: #64748b; }
+
+html.dark .analysis-item { background: #334155; color: #cbd5e0; }
+html.dark .analysis-item:hover { background: #475569; color: #f1f5f9; }
+html.dark .save-work-btn { background: #475569; color: #f1f5f9; }
+html.dark .save-work-btn:hover { background: #64748b; }
+html.dark .save-work-btn.saving { background: #64748b; }
+
+html.dark .collapse-left { background: #1e293b; color: #cbd5e0; border-color: #334155; }
+html.dark .collapse-left:hover { background: #334155; color: #f1f5f9; }
+
+html.dark .editor-main { background: #0f172a; }
+html.dark .chapter-title { color: #f1f5f9; }
+html.dark .chapter-title:hover,
+html.dark .chapter-title:focus { background: #1e293b; }
+html.dark .summary-card { background: #1e293b; border-color: #334155; }
+html.dark .summary-content { color: #cbd5e0; }
+
+html.dark .editor-toolbar { background: #1e293b; border-color: #334155; }
+html.dark .tb-btn { color: #cbd5e0; }
+html.dark .tb-btn:hover { background: #334155; color: #f1f5f9; }
+html.dark .tb-btn.active { background: rgba(59, 130, 244, 0.18); color: #93c5fd; }
+
+html.dark .editor-footer { background: #1e293b; border-color: #334155; color: #cbd5e0; }
+html.dark .save-status.saving { color: #fbbf24; }
+html.dark .save-status.saved { color: #34d399; }
+
+html.dark .chat-display { background: #0f172a; }
+html.dark .chat-empty { color: #64748b; }
+html.dark .chat-msg.user .chat-msg-content { background: #1e40af; color: #fff; }
+html.dark .chat-msg.assistant .chat-msg-content { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; }
+
+html.dark .ai-output-card {
+  background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+  border-color: #334155;
+  color: #e2e8f0;
+}
+html.dark .ai-output-card.streaming-card { background: #1a2540; border-color: #3b4969; }
+html.dark .ai-output-content.streaming { color: #93c5fd; }
+html.dark .ai-act-btn { color: #cbd5e0; }
+html.dark .ai-act-btn:hover { background: #334155; color: #93c5fd; }
+
+html.dark .link-section { background: #1e293b; border-color: #334155; }
+html.dark .link-item { background: #334155; color: #cbd5e0; }
+html.dark .link-item .link-remove:hover { color: #fca5a5; }
+
+html.dark .chat-input-wrap,
+html.dark .input-bottom { background: #1e293b; }
+html.dark .input-bottom-left .el-select .el-input__wrapper { background: #334155; }
+
+html.dark .slash-menu { background: #1e293b; border-color: #475569; box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
+html.dark .slash-menu-item { color: #cbd5e0; }
+html.dark .slash-menu-item:hover { background: #334155; color: #93c5fd; }
+
+html.dark .option-btn { background: #334155; color: #cbd5e0; border-color: #475569; }
+html.dark .option-btn:hover { background: #475569; }
+html.dark .option-btn.selected { background: #1e40af; border-color: #3b82f6; color: #fff; }
+
+html.dark .canvas-link-btn { background: #334155; color: #cbd5e0; }
+html.dark .canvas-link-btn.canvas-linked { background: #1e40af; color: #fff; }
+
+html.dark .history-drawer { background: #1e293b; color: #e2e8f0; }
+html.dark .history-drawer .el-drawer__header { color: #f1f5f9; }
+
+/* ===== @ 多选小窗 深色 ===== */
+html.dark .at-picker-dialog .el-dialog,
+html.dark .at-picker-dialog .el-dialog__header,
+html.dark .at-picker-dialog .el-dialog__body,
+html.dark .at-picker-dialog .el-dialog__footer { background: #1e293b; color: #e2e8f0; }
+html.dark .at-picker-groups { background: #0f172a; border-color: #334155; }
+html.dark .at-group-header { color: #cbd5e0; }
+html.dark .at-group-header:hover { background: #334155; }
+html.dark .at-item { color: #cbd5e0; }
+html.dark .at-item:hover { background: #334155; }
+html.dark .at-item.checked { background: rgba(59, 130, 244, 0.15); }
+
+/* Element Plus 下拉浮层深色（teleported to body） */
+html.dark .el-select-dropdown,
+html.dark .el-popper {
+  background: #1e293b;
+  border-color: #475569 !important;
+}
+html.dark .el-select-dropdown__item { color: #cbd5e0; }
+html.dark .el-select-dropdown__item.hover,
+html.dark .el-select-dropdown__item:hover { background: #334155; }
+html.dark .el-select-dropdown__item.selected { color: #93c5fd; }
+
+html.dark .el-input__wrapper { background: #334155; box-shadow: 0 0 0 1px #475569 inset !important; }
+html.dark .el-input__inner { color: #f1f5f9; }
+html.dark .el-input__inner::placeholder { color: #64748b; }
+
+html.dark .el-textarea__inner { background: #1e293b; color: #f1f5f9; border-color: #475569; }
+
+html.dark .el-button--default { background: #334155; border-color: #475569; color: #e2e8f0; }
+html.dark .el-button--default:hover { background: #475569; color: #f1f5f9; border-color: #64748b; }
 </style>

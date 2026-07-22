@@ -44,13 +44,18 @@ const api = {
   // ====== AI 调用 ======
   ai: {
     // 流式聊天，回调返回每个 chunk
+    // 返回 { promise, cancel }：cancel() 可中止主进程 fetch
     stream: (req: any, onChunk: (text: string) => void) => {
       const chan = 'ai:stream:' + Math.random().toString(36).slice(2)
       const listener = (_e: any, text: string) => onChunk(text)
       ipcRenderer.on(chan, listener)
-      return ipcRenderer.invoke('ai:stream', req, chan).finally(() => {
+      const promise = ipcRenderer.invoke('ai:stream', req, chan).finally(() => {
         ipcRenderer.removeListener(chan, listener)
       })
+      const cancel = () => {
+        try { ipcRenderer.send('ai:stream:cancel', chan) } catch {}
+      }
+      return { promise, cancel }
     },
     // 非流式
     chat: (req: any) => ipcRenderer.invoke('ai:chat', req)
@@ -114,13 +119,6 @@ const api = {
       ipcRenderer.on('updater:progress', listener)
       return () => ipcRenderer.removeListener('updater:progress', listener)
     }
-  },
-
-  // ====== 菜单事件 ======
-  onMenu: (channel: string, cb: () => void) => {
-    const listener = () => cb()
-    ipcRenderer.on(channel, listener)
-    return () => ipcRenderer.removeListener(channel, listener)
   }
 }
 

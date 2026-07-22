@@ -1,5 +1,17 @@
-import { ipcMain } from 'electron'
+import { ipcMain, IpcMainInvokeEvent } from 'electron'
 import type { AIRequest } from '../../src/types'
+
+/**
+ * 安全地给渲染进程发消息：webContents 可能在流式过程中被销毁（用户关窗），
+ * 直接 event.sender.send 会抛未捕获异常，这里包 try/catch 静默忽略
+ */
+function safeSend(event: IpcMainInvokeEvent, chan: string, payload: string) {
+  try {
+    if (!event.sender.isDestroyed()) event.sender.send(chan, payload)
+  } catch {
+    // webContents 已销毁，忽略
+  }
+}
 
 export function registerAIIPC() {
   // 流式聊天
@@ -63,7 +75,7 @@ export function registerAIIPC() {
           if (!t || !t.startsWith('data:')) continue
           const data = t.slice(5).trim()
           if (data === '[DONE]') {
-            event.sender.send(chan, '')
+            safeSend(event, chan, '')
             return full
           }
           try {
@@ -71,7 +83,7 @@ export function registerAIIPC() {
             const delta = json.choices?.[0]?.delta?.content || ''
             if (delta) {
               full += delta
-              event.sender.send(chan, delta)
+              safeSend(event, chan, delta)
             }
           } catch {
             // 忽略解析错误

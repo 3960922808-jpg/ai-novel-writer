@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/x-icon" href="/icon.ico" />
     <link rel="shortcut icon" type="image/x-icon" href="/icon.ico" />
+    <!-- CSP：限制脚本只来自 self，禁止内联脚本、远程脚本、data: 脚本 -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https: http:;" />
     <title>TrmWrite</title>
   </head>
   <body>

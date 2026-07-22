@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, shell, dialog } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
@@ -55,7 +55,8 @@ function createWindow() {
     webPreferences: {
       preload: findPreload(),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      sandbox: true
     }
   })
 
@@ -107,8 +108,17 @@ app.whenReady().then(async () => {
   try {
     await initDB()
     console.log('[main] 数据库初始化成功')
-  } catch (e) {
+  } catch (e: any) {
     console.error('[main] 数据库初始化失败:', e)
+    // L4 修复：DB 初始化失败属致命错误，弹窗告知用户并退出
+    // 否则后续所有 IPC 都会报 "DB not initialized"，用户看不到根因
+    dialog.showErrorBox(
+      'TrmWrite 无法启动',
+      '数据库初始化失败，应用无法继续运行。\n\n错误：' + (e?.message || String(e)) +
+      '\n\n请检查数据目录是否可读写，或联系开发者。'
+    )
+    app.quit()
+    return
   }
   try {
     registerStoreIPC()

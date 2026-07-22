@@ -31,6 +31,17 @@ function htmlToPlain(html: string): string {
     .trim()
 }
 
+/** HTML 字符转义：用户输入（项目标题/描述/章节标题）拼入导出 HTML 前必须转义，防止存储型 XSS */
+function escapeHtml(s: string | undefined | null): string {
+  if (!s) return ''
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 async function saveDialog(win: BrowserWindow | null, defaultName: string, ext: string) {
   if (!win) return null as any
   const result = await dialog.showSaveDialog(win, {
@@ -62,13 +73,17 @@ export function registerExportIPC() {
   // ====== HTML ======
   ipcMain.handle('export:html', async (e, projectId: string) => {
     const { project, chapters } = await buildProjectData(projectId)
-    let body = `<h1>${project.title}</h1>`
-    if (project.description) body += `<blockquote>${project.description}</blockquote>`
+    // 用户字段先转义，避免存储型 XSS（项目标题/描述/章节标题拼入导出 HTML）
+    const safeTitle = escapeHtml(project.title)
+    const safeDesc = escapeHtml(project.description)
+    let body = `<h1>${safeTitle}</h1>`
+    if (project.description) body += `<blockquote>${safeDesc}</blockquote>`
     for (const c of chapters) {
-      body += `<h2>第${c.order}章 ${c.title}</h2>`
+      const safeChapTitle = escapeHtml(c.title)
+      body += `<h2>第${c.order}章 ${safeChapTitle}</h2>`
       body += c.contentType === 'html' ? c.content : (marked.parse(c.content) as string)
     }
-    const html = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>${project.title}</title>
+    const html = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>${safeTitle}</title>
     <style>body{max-width:760px;margin:40px auto;font-family:"思源宋体",serif;line-height:1.9;padding:0 16px}
     h1{text-align:center}h2{border-bottom:1px solid #ddd;padding-bottom:6px}blockquote{color:#666}</style>
     </head><body>${body}</body></html>`
@@ -143,12 +158,17 @@ export function registerExportIPC() {
       const win = BrowserWindow.fromWebContents(e.sender)
       if (!win) return null
       const data = await buildProjectData(projectId)
-      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${data.project.title}</title>
+      // 用户字段转义，防止 PDF 内嵌可执行脚本
+      const safePTitle = escapeHtml(data.project.title)
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${safePTitle}</title>
       <style>body{font-family:'Microsoft YaHei',sans-serif;max-width:800px;margin:40px auto;padding:20px;line-height:1.8}
       h1{text-align:center} h2{margin-top:2em;border-bottom:1px solid #ccc;padding-bottom:5px}</style></head>
-      <body><h1>${data.project.title}</h1>${data.chapters.map(c => `<h2>${c.title}</h2>${c.content}`).join('')}</body></html>`
+      <body><h1>${safePTitle}</h1>${data.chapters.map(c => `<h2>${escapeHtml(c.title)}</h2>${c.content}`).join('')}</body></html>`
 
-      const pdfWin = new BrowserWindow({ show: false, webPreferences: { offscreen: true } })
+      const pdfWin = new BrowserWindow({
+        show: false,
+        webPreferences: { offscreen: true, contextIsolation: true, nodeIntegration: false, sandbox: true }
+      })
       try {
         await pdfWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
         const pdf = await pdfWin.webContents.printToPDF({ printBackground: false, margins: { top: 0, bottom: 0, left: 0, right: 0 } })
