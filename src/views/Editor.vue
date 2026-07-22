@@ -457,7 +457,6 @@
             </el-select>
           </div>
           <div class="input-bottom-right">
-            <span class="text-faint text-xs screenshot-hint">截图 Alt+D</span>
             <span class="text-faint text-xs">{{ userInput.length }} 字</span>
           </div>
         </div>
@@ -955,14 +954,14 @@ const filteredSkills = computed(() => {
  * 解析输入框中的 @ 关键词，匹配项目内地点/设定/章节
  * 触发条件：光标前最近一个 @ 后没有空格，且 @ 后字符长度 > 0
  */
-function detectAtKeyword(text: string, caret: number): string {
+function detectAtKeyword(text: string, caret: number): string | null {
   // 从光标向前找 @
   const before = text.slice(0, caret)
   const atIdx = before.lastIndexOf('@')
-  if (atIdx < 0) return ''
+  if (atIdx < 0) return null
   // @ 必须紧跟非空格内容
   const after = before.slice(atIdx + 1)
-  if (after.includes(' ') || after.includes('\n')) return ''
+  if (after.includes(' ') || after.includes('\n')) return null
   return after
 }
 
@@ -1166,8 +1165,8 @@ function onInput(e: Event) {
   }
   // 检测 @ 触发
   const atKw = detectAtKeyword(v, caret)
-  if (atKw !== null && atKw.length >= 0 && v.includes('@')) {
-    // @ 后允许 0 个字符也可弹菜单
+  if (atKw !== null) {
+    // @ 后允许 0 个字符也可弹菜单（atKw === '' 表示刚输入 @）
     atMenuVisible.value = true
     atMatches.value = buildAtMatches(atKw)
   } else {
