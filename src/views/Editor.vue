@@ -622,6 +622,11 @@ async function linkCanvas() {
   // 加载画布工作流节点
   try {
     const all = await db.Canvas.list(project.value.id)
+    if (!all || all.length === 0) {
+      ElMessage.warning('故事画布为空，请先到故事画布添加节点')
+      return
+    }
+    // 优先用工作流节点（start/inciting/rising/climax/resolution），按工作流顺序排序
     const workflowTypes = ['start', 'inciting', 'rising', 'climax', 'resolution']
     const workflow = all
       .filter(n => (workflowTypes as string[]).includes(n.type))
@@ -631,13 +636,27 @@ async function linkCanvas() {
         if (ai2 !== bi2) return ai2 - bi2
         return (a.order || 0) - (b.order || 0)
       })
-    if (workflow.length === 0) {
-      ElMessage.warning('故事画布暂无工作流节点，请先到故事画布添加 start/inciting/rising/climax/resolution 类型节点，或点击「插入工作流模板」')
+    let finalWorkflow: CanvasNode[]
+    if (workflow.length > 0) {
+      // 有工作流节点：用工作流节点
+      finalWorkflow = workflow
+    } else {
+      // 没有工作流节点：回退到普通节点（scene/plot/character/theme/note），按 order 排序
+      finalWorkflow = all
+        .filter(n => ['scene', 'plot', 'character', 'theme', 'note'].includes(n.type))
+        .sort((a, b) => (a.order || 0) - (b.order || 0))
+      if (finalWorkflow.length === 0) {
+        // 最后兜底：所有节点都算上
+        finalWorkflow = all.slice().sort((a, b) => (a.order || 0) - (b.order || 0))
+      }
+    }
+    if (finalWorkflow.length === 0) {
+      ElMessage.warning('故事画布无可用节点')
       return
     }
-    canvasWorkflow.value = workflow
+    canvasWorkflow.value = finalWorkflow
     canvasLinked.value = true
-    ElMessage.success(`已链接故事画布，共 ${workflow.length} 个工作流节点，AI 续写将按此顺序推进情节`)
+    ElMessage.success(`已链接故事画布，共 ${finalWorkflow.length} 个节点，AI 续写将按此顺序推进情节`)
   } catch (e: any) {
     ElMessage.error('加载画布失败：' + (e?.message || e))
   }
@@ -647,15 +666,16 @@ async function linkCanvas() {
 function buildCanvasContext(): string {
   if (!canvasLinked.value || canvasWorkflow.value.length === 0) return ''
   const parts: string[] = []
-  parts.push('【故事画布工作流】请按以下工作流节点顺序推进剧情：')
+  parts.push('【故事画布工作流】请按以下画布节点顺序推进剧情：')
+  const typeLabel: Record<string, string> = {
+    start: '起点', inciting: '触发事件', rising: '发展', climax: '高潮', resolution: '结局',
+    scene: '场景', plot: '情节', character: '人物', theme: '主题', note: '备注'
+  }
   canvasWorkflow.value.forEach((n, idx) => {
-    const typeLabel: Record<string, string> = {
-      start: '起点', inciting: '触发事件', rising: '发展', climax: '高潮', resolution: '结局'
-    }
     const label = typeLabel[n.type] || n.type
     parts.push(`${idx + 1}. [${label}] ${n.title || ''}：${n.aiPrompt || n.content || '（无具体提示）'}`)
   })
-  parts.push('请严格按上述工作流顺序推进当前章节的情节发展。')
+  parts.push('请严格按上述画布节点顺序推进当前章节的情节发展。')
   return parts.join('\n')
 }
 
@@ -1216,11 +1236,8 @@ async function sendChat() {
       ? '\n\n【交互规则】只在以下情况向用户提问：1) 剧情走向有多种可能且无法判断用户偏好 2) 角色动机/设定存在矛盾 3) 用户提供的信息不足。提问时使用 ===QUESTION=== ... ===END=== 格式给出 ABCD 三个选项加 D 自定义。能够确定方向时直接续写，不要每段都问。'
       : '\n\n【交互规则】直接续写，不要提问。'
   let sysContent = `你是一位资深小说家，擅长${project.value.genre}类型创作。请直接输出正文内容，不要写"以下是续写"等说明性文字，不要使用 markdown 代码块。文风自然流畅，避免AI味。${project.value.settings.styleSample ? '\n参考文风：' + project.value.settings.styleSample : ''}${askModePrompt}`
-  // 链接故事画布时，把工作流注入 system prompt
+  // 链接故事画布的上下文：先缓存，稍后在 sysContent 被技能模板覆盖后再次追加，避免丢失
   const canvasCtx = buildCanvasContext()
-  if (canvasCtx) {
-    sysContent += '\n\n' + canvasCtx
-  }
   let userContent = userMsg
 
   // 自动填充变量的辅助函数
@@ -1249,6 +1266,11 @@ async function sendChat() {
     ...extra
   })
 
+  // @ 关联内容：所有分支都应注入到 userContent，确保 AI 能看到
+  const linkedContent = linkedItems.value.length
+    ? linkedItems.value.map(i => `【${i.label}】\n${i.content}`).join('\n\n')
+    : ''
+
   if (pendingSkill.value) {
     // 使用技能的 system + user 模板，自动填充变量
     sysContent = pendingSkill.value.systemPrompt || sysContent
@@ -1260,6 +1282,10 @@ async function sendChat() {
     } else if (userMsg && pendingSkill.value.variables && !pendingSkill.value.variables.some(v => ['instruction', 'scene', 'emotion', 'topic'].includes(v))) {
       userContent += `\n\n【用户补充说明】${userMsg}`
     }
+    // 注入 @ 关联内容（技能分支此前丢失，这里补齐）
+    if (linkedContent) {
+      userContent += `\n\n【@ 关联内容】\n${linkedContent}`
+    }
     pendingSkill.value = null
   } else if (selectedPromptId.value) {
     const all = [...builtinPrompts.value, ...projectPrompts.value]
@@ -1268,10 +1294,18 @@ async function sendChat() {
       const vars = fillVars()
       userContent = aiSvc.renderTemplate(tpl.content, vars)
     }
+    // 注入 @ 关联内容（提示词分支此前丢失，这里补齐）
+    if (linkedContent) {
+      userContent += `\n\n【@ 关联内容】\n${linkedContent}`
+    }
   } else {
-    // 普通对话：拼上上下文
-    const linkedContent = linkedItems.value.map(i => i.content).join('\n\n')
-    userContent = `${userMsg}\n\n${linkedContent ? '【关联内容】\n' + linkedContent + '\n\n' : ''}【当前上下文】\n${ctx}`
+    // 普通对话：拼上上下文 + 关联内容
+    userContent = `${userMsg}\n\n${linkedContent ? '@ 关联内容：\n' + linkedContent + '\n\n' : ''}【当前上下文】\n${ctx}`
+  }
+
+  // 最后再把画布上下文追加到 sysContent（必须在技能分支覆盖之后，否则会被覆盖丢失）
+  if (canvasCtx) {
+    sysContent += '\n\n' + canvasCtx
   }
 
   generating.value = true
