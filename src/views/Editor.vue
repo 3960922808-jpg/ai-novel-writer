@@ -666,16 +666,29 @@ async function linkCanvas() {
 function buildCanvasContext(): string {
   if (!canvasLinked.value || canvasWorkflow.value.length === 0) return ''
   const parts: string[] = []
-  parts.push('【故事画布工作流】请按以下画布节点顺序推进剧情：')
+  parts.push('【故事画布工作流】')
   const typeLabel: Record<string, string> = {
     start: '起点', inciting: '触发事件', rising: '发展', climax: '高潮', resolution: '结局',
     scene: '场景', plot: '情节', character: '人物', theme: '主题', note: '备注'
   }
+  // 全部节点都列出，让 AI 看到完整工作流
   canvasWorkflow.value.forEach((n, idx) => {
     const label = typeLabel[n.type] || n.type
     parts.push(`${idx + 1}. [${label}] ${n.title || ''}：${n.aiPrompt || n.content || '（无具体提示）'}`)
   })
-  parts.push('请严格按上述画布节点顺序推进当前章节的情节发展。')
+  // 根据当前章节 order 定位"当前应推进的节点"
+  const curOrder = chapter.value?.order || 1
+  const curIdx = Math.min(Math.max(0, curOrder - 1), canvasWorkflow.value.length - 1)
+  const curNode = canvasWorkflow.value[curIdx]
+  if (curNode) {
+    const curLabel = typeLabel[curNode.type] || curNode.type
+    parts.push('')
+    parts.push(`【当前任务】现在是第 ${curOrder} 章，对应工作流第 ${curIdx + 1} 个节点「[${curLabel}] ${curNode.title || ''}」。`)
+    parts.push(`本章节必须严格围绕此节点推进：${curNode.aiPrompt || curNode.content || '按节点标题展开'}`)
+    parts.push('请直接输出本章正文内容，不要写"以下是续写"等说明文字。')
+  } else {
+    parts.push('请严格按上述画布节点顺序推进当前章节的情节发展。')
+  }
   return parts.join('\n')
 }
 
@@ -1247,9 +1260,16 @@ async function sendChat() {
   const selText = selRange && selRange.to > selRange.from
     ? editor.value!.state.doc.textBetween(selRange.from, selRange.to, '\n')
     : ''
+  // @ 关联内容：所有分支都应注入到 userContent，确保 AI 能看到
+  const linkedContent = linkedItems.value.length
+    ? linkedItems.value.map(i => `【${i.label}】\n${i.content}`).join('\n\n')
+    : ''
+  // 用户要求：@ 关联存在时，不发送章节正文，只发 @ 关联文件内容
+  const hasLinked = !!linkedContent
   const fillVars = (extra: Record<string, string> = {}): Record<string, string> => ({
-    content: selText || fullText.slice(-2000),
-    context: ctx,
+    // 有 @ 关联时 content 留空，避免把正文一起带过去
+    content: hasLinked ? '' : (selText || fullText.slice(-2000)),
+    context: hasLinked ? '' : ctx,
     genre: project.value?.genre || '',
     title: project.value?.title || '',
     setup: project.value?.description || '',
@@ -1261,15 +1281,10 @@ async function sendChat() {
     emotion: '',
     imitationGuide: project.value?.settings.styleSample || '',
     searchResults: '',
-    excerpt: fullText.slice(0, 3000),
+    excerpt: hasLinked ? '' : fullText.slice(0, 3000),
     topic: userMsg,
     ...extra
   })
-
-  // @ 关联内容：所有分支都应注入到 userContent，确保 AI 能看到
-  const linkedContent = linkedItems.value.length
-    ? linkedItems.value.map(i => `【${i.label}】\n${i.content}`).join('\n\n')
-    : ''
 
   if (pendingSkill.value) {
     // 使用技能的 system + user 模板，自动填充变量
@@ -1299,8 +1314,14 @@ async function sendChat() {
       userContent += `\n\n【@ 关联内容】\n${linkedContent}`
     }
   } else {
-    // 普通对话：拼上上下文 + 关联内容
-    userContent = `${userMsg}\n\n${linkedContent ? '@ 关联内容：\n' + linkedContent + '\n\n' : ''}【当前上下文】\n${ctx}`
+    // 普通对话：
+    // - 有 @ 关联时只发关联文件内容，不发正文上下文
+    // - 无 @ 关联时发用户消息 + 当前上下文（含正文摘要）
+    if (hasLinked) {
+      userContent = `${userMsg}\n\n【@ 关联内容】\n${linkedContent}`
+    } else {
+      userContent = `${userMsg}\n\n【当前上下文】\n${ctx}`
+    }
   }
 
   // 最后再把画布上下文追加到 sysContent（必须在技能分支覆盖之后，否则会被覆盖丢失）
