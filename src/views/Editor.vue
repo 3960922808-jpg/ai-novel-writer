@@ -343,15 +343,29 @@
             </el-tag>
             <span class="text-faint text-xs">技能已选中，输入补充说明后发送（或直接发送）</span>
           </div>
-          <textarea
-            ref="inputRef"
-            v-model="userInput"
-            class="chat-input"
-            placeholder="请输入指令，输入 @ 关联地点/设定/章节，输入 / 触发技能"
-            rows="4"
-            @input="onInput"
-            @keydown="onKeydown"
-          ></textarea>
+          <div class="chat-input-wrap">
+            <textarea
+              ref="inputRef"
+              v-model="userInput"
+              class="chat-input"
+              placeholder="请输入指令，输入 @ 关联地点/设定/章节，输入 / 触发技能"
+              rows="4"
+              @input="onInput"
+              @keydown="onKeydown"
+            ></textarea>
+            <!-- 显眼的“发送需求”按钮（textarea 右下角浮动） -->
+            <button
+              class="send-demand-btn"
+              :class="{ disabled: !canSend || generating }"
+              :disabled="!canSend || generating"
+              @click="sendChat"
+              :title="generating ? 'AI 正在生成…' : '点击发送需求（Enter）'"
+            >
+              <el-icon v-if="generating" class="loading-icon"><Loading /></el-icon>
+              <el-icon v-else><Promotion /></el-icon>
+              <span>{{ generating ? '生成中' : '发送需求' }}</span>
+            </button>
+          </div>
 
           <!-- 技能弹出菜单 -->
           <div v-if="slashMenuVisible" class="slash-menu">
@@ -444,9 +458,7 @@
           </div>
           <div class="input-bottom-right">
             <span class="text-faint text-xs screenshot-hint">截图 Alt+D</span>
-            <button class="send-btn" :disabled="!canSend" :loading="generating" @click="sendChat">
-              <el-icon><Promotion /></el-icon>
-            </button>
+            <span class="text-faint text-xs">{{ userInput.length }} 字</span>
           </div>
         </div>
       </aside>
@@ -2426,20 +2438,72 @@ html.dark .tb-sep { background: #334155; }
   margin-bottom: 6px;
   flex-wrap: wrap;
 }
+.chat-input-wrap {
+  position: relative;
+  width: 100%;
+}
 .chat-input {
   width: 100%;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
-  padding: 8px 10px;
-  font-size: 13px;
-  line-height: 1.6;
+  padding: 10px 12px;
+  /* 右下方给浮动按钮让出空间，避免文字被按钮遮挡 */
+  padding-bottom: 44px;
+  font-size: 14px;
+  line-height: 1.65;
   resize: none;
   font-family: inherit;
   outline: none;
   background: #ffffff;
   color: #1a202c;
+  box-sizing: border-box;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 .chat-input:focus { border-color: #2563eb; box-shadow: 0 0 0 2px #e6f0ff; }
+
+/* 显眼的“发送需求”按钮（textarea 右下角浮动） */
+.send-demand-btn {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);
+  transition: transform 0.12s, box-shadow 0.12s, background 0.12s;
+  z-index: 2;
+}
+.send-demand-btn:hover:not(.disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.4);
+  background: linear-gradient(135deg, #1d4ed8 0%, #1e3a8a 100%);
+}
+.send-demand-btn:active:not(.disabled) {
+  transform: translateY(0);
+}
+.send-demand-btn.disabled,
+.send-demand-btn:disabled {
+  background: #cbd5e0;
+  cursor: not-allowed;
+  box-shadow: none;
+  color: #ffffff;
+  opacity: 0.85;
+}
+.send-demand-btn .loading-icon {
+  animation: rotate 1s linear infinite;
+}
+@keyframes rotate {
+  to { transform: rotate(360deg); }
+}
 
 .slash-menu {
   position: absolute;
@@ -2506,21 +2570,6 @@ html.dark .tb-sep { background: #334155; }
   gap: 8px;
 }
 .screenshot-hint { color: #cbd5e0; }
-.send-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: #2563eb;
-  border: none;
-  color: white;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-}
-.send-btn:hover:not(:disabled) { background: #1e40af; }
-.send-btn:disabled { background: #cbd5e0; cursor: not-allowed; }
 
 /* ===== 历史抽屉 ===== */
 .history-list { display: flex; flex-direction: column; gap: 8px; }
