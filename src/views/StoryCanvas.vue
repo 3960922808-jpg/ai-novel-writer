@@ -341,6 +341,35 @@ function isWorkflowType(t: CanvasNode['type']): boolean {
   return WORKFLOW_ORDER.includes(t)
 }
 
+function orderNodesByLinks(source: CanvasNode[]): CanvasNode[] {
+  if (source.length <= 1) return [...source]
+  const map = new Map(source.map(n => [n.id, n]))
+  const incoming = new Set<string>()
+  for (const node of source) {
+    for (const id of node.links || []) {
+      if (map.has(id)) incoming.add(id)
+    }
+  }
+  const start = source.find(n => !incoming.has(n.id)) || source[0]
+  const ordered: CanvasNode[] = []
+  const seen = new Set<string>()
+  let cur: CanvasNode | undefined = start
+  while (cur && !seen.has(cur.id)) {
+    ordered.push(cur)
+    seen.add(cur.id)
+    cur = (cur.links || []).map(id => map.get(id)).find(Boolean) as CanvasNode | undefined
+  }
+  const rest = source
+    .filter(n => !seen.has(n.id))
+    .sort((a, b) => {
+      const ai = WORKFLOW_ORDER.indexOf(a.type)
+      const bi = WORKFLOW_ORDER.indexOf(b.type)
+      if (ai !== bi) return ai - bi
+      return (a.order || 0) - (b.order || 0)
+    })
+  return [...ordered, ...rest]
+}
+
 const form = reactive<{
   id?: ID
   type: CanvasNode['type']
@@ -373,7 +402,7 @@ const availableModels = computed(() => settings.availableModels())
 
 // 工作流节点：按 WORKFLOW_ORDER 顺序 + order 升序排列
 const workflowNodes = computed<CanvasNode[]>(() => {
-  return nodes.value
+  const sorted = nodes.value
     .filter(n => isWorkflowType(n.type))
     .sort((a, b) => {
       const ai2 = WORKFLOW_ORDER.indexOf(a.type)
@@ -381,6 +410,7 @@ const workflowNodes = computed<CanvasNode[]>(() => {
       if (ai2 !== bi2) return ai2 - bi2
       return (a.order || 0) - (b.order || 0)
     })
+  return orderNodesByLinks(sorted)
 })
 
 function workflowIndex(node: CanvasNode): number {
@@ -913,6 +943,11 @@ function generateChapterFromWorkflow() {
 // 构建发送给 AI 的工作流提示词
 function buildWorkflowPrompt(): string {
   const proj = project.value
+  const targetChapter = chapters.value.find(c => c.id === genForm.chapterId)
+  const targetIndex = targetChapter
+    ? Math.min(Math.max(0, targetChapter.order - 1), workflowNodes.value.length - 1)
+    : 0
+  const targetNode = workflowNodes.value[targetIndex]
   const parts: string[] = []
   parts.push(`你是一位资深小说创作者。请根据以下故事工作流，生成一个完整的章节内容。`)
   parts.push('')
@@ -920,12 +955,21 @@ function buildWorkflowPrompt(): string {
   if (proj?.description) {
     parts.push(`小说简介：${proj.description}`)
   }
+  if (targetChapter) {
+    parts.push(`目标章节：第 ${targetChapter.order} 章《${targetChapter.title}》`)
+  }
+  if (targetNode) {
+    parts.push(`当前章节必须围绕工作流节点 ${targetIndex + 1}「${TYPE_LABELS[targetNode.type]}：${targetNode.title || '未命名'}」展开。`)
+  }
   parts.push(`目标字数：约 ${genForm.targetWords} 字`)
   parts.push('')
   parts.push('## 故事工作流（按以下顺序串联生成内容）')
   parts.push('')
   workflowNodes.value.forEach((n, idx) => {
     parts.push(`### 节点 ${idx + 1} · ${TYPE_LABELS[n.type]}：${n.title || '未命名'}`)
+    if (idx === targetIndex) {
+      parts.push('本章重点：是，必须主要展开此节点。')
+    }
     if (n.aiPrompt) {
       parts.push(`要求：${n.aiPrompt}`)
     }
@@ -935,7 +979,9 @@ function buildWorkflowPrompt(): string {
     parts.push('')
   })
   parts.push('## 输出要求')
-  parts.push('- 严格按工作流节点顺序推进剧情，每个节点的内容自然衔接下一节点')
+  parts.push('- 严格遵守用户在画布中连接出的工作流顺序')
+  parts.push('- 本次只生成目标章节内容，不要把整条工作流全部写完')
+  parts.push('- 当前章节围绕标记为“本章重点”的节点展开，其他节点只作为前后文约束')
   parts.push('- 直接输出小说正文，不要输出任何说明、注释或标题')
   parts.push('- 保持文风统一，符合中文小说阅读习惯')
   parts.push('- 控制节奏，确保每个工作流节点的戏份饱满')

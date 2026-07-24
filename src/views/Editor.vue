@@ -608,6 +608,40 @@ function goToCanvas() {
 // 链接故事画布：启用后 AI 续写会按工作流节点顺序生成情节
 const canvasLinked = ref(false)
 const canvasWorkflow = ref<CanvasNode[]>([])
+const WORKFLOW_TYPES: CanvasNode['type'][] = ['start', 'inciting', 'rising', 'climax', 'resolution']
+
+function orderCanvasNodes(all: CanvasNode[]): CanvasNode[] {
+  const candidates = all.filter(n => WORKFLOW_TYPES.includes(n.type))
+  const pool = candidates.length > 0
+    ? candidates
+    : all.filter(n => ['scene', 'plot', 'character', 'theme', 'note'].includes(n.type))
+  const source = pool.length > 0 ? pool : all
+  const map = new Map(source.map(n => [n.id, n]))
+  const incoming = new Set<string>()
+  for (const node of source) {
+    for (const id of node.links || []) {
+      if (map.has(id)) incoming.add(id)
+    }
+  }
+  const start = source.find(n => !incoming.has(n.id)) || source[0]
+  const ordered: CanvasNode[] = []
+  const seen = new Set<string>()
+  let cur: CanvasNode | undefined = start
+  while (cur && !seen.has(cur.id)) {
+    ordered.push(cur)
+    seen.add(cur.id)
+    cur = (cur.links || []).map(id => map.get(id)).find(Boolean) as CanvasNode | undefined
+  }
+  const rest = source
+    .filter(n => !seen.has(n.id))
+    .sort((a, b) => {
+      const ai = WORKFLOW_TYPES.indexOf(a.type)
+      const bi = WORKFLOW_TYPES.indexOf(b.type)
+      if (ai !== bi) return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi)
+      return (a.order || 0) - (b.order || 0)
+    })
+  return [...ordered, ...rest]
+}
 
 async function linkCanvas() {
   if (!project.value) return
@@ -625,30 +659,7 @@ async function linkCanvas() {
       ElMessage.warning('故事画布为空，请先到故事画布添加节点')
       return
     }
-    // 优先用工作流节点（start/inciting/rising/climax/resolution），按工作流顺序排序
-    const workflowTypes = ['start', 'inciting', 'rising', 'climax', 'resolution']
-    const workflow = all
-      .filter(n => (workflowTypes as string[]).includes(n.type))
-      .sort((a, b) => {
-        const ai2 = workflowTypes.indexOf(a.type)
-        const bi2 = workflowTypes.indexOf(b.type)
-        if (ai2 !== bi2) return ai2 - bi2
-        return (a.order || 0) - (b.order || 0)
-      })
-    let finalWorkflow: CanvasNode[]
-    if (workflow.length > 0) {
-      // 有工作流节点：用工作流节点
-      finalWorkflow = workflow
-    } else {
-      // 没有工作流节点：回退到普通节点（scene/plot/character/theme/note），按 order 排序
-      finalWorkflow = all
-        .filter(n => ['scene', 'plot', 'character', 'theme', 'note'].includes(n.type))
-        .sort((a, b) => (a.order || 0) - (b.order || 0))
-      if (finalWorkflow.length === 0) {
-        // 最后兜底：所有节点都算上
-        finalWorkflow = all.slice().sort((a, b) => (a.order || 0) - (b.order || 0))
-      }
-    }
+    const finalWorkflow = orderCanvasNodes(all)
     if (finalWorkflow.length === 0) {
       ElMessage.warning('故事画布无可用节点')
       return
@@ -1212,7 +1223,15 @@ function clearPendingSkill() {
 
 const pendingSkill = ref<Skill | null>(null)
 
-const canSend = computed(() => (userInput.value.trim() || selectedPromptId.value || pendingSkill.value) && !generating.value)
+const canSend = computed(() => (userInput.value.trim() || linkedItems.value.length > 0 || selectedPromptId.value || pendingSkill.value) && !generating.value)
+
+function stripLinkedMentions(text: string): string {
+  let cleaned = text
+  for (const item of linkedItems.value) {
+    cleaned = cleaned.replaceAll(`@${item.label}`, '')
+  }
+  return cleaned.replace(/@[^\s@]+(?:\s+|$)/g, '').replace(/\s+/g, ' ').trim()
+}
 
 function getProvider() {
   const m = aiModel.value || project.value?.settings.model || ''
@@ -1227,14 +1246,16 @@ async function sendChat() {
     return
   }
 
-  const userMsg = userInput.value.trim()
+  const rawUserMsg = userInput.value.trim()
+  const userMsg = stripLinkedMentions(rawUserMsg)
   // 如果选了技能但没输入，也算有效（直接用技能模板）
-  if (!userMsg && !pendingSkill.value && !selectedPromptId.value) return
+  if (!rawUserMsg && linkedItems.value.length === 0 && !pendingSkill.value && !selectedPromptId.value) return
 
   // 显示给用户的消息：技能 chip + 补充说明
+  const linkedLabels = linkedItems.value.map(i => `@${i.label}`).join(' ')
   const displayMsg = pendingSkill.value
-    ? `[技能：${pendingSkill.value.name}]${userMsg ? '\n' + userMsg : ''}`
-    : userMsg
+    ? `[技能：${pendingSkill.value.name}]${userMsg ? '\n' + userMsg : ''}${linkedLabels ? '\n' + linkedLabels : ''}`
+    : (userMsg || linkedLabels)
   chatMessages.value.push({ role: 'user', content: displayMsg })
   userInput.value = ''
   slashMenuVisible.value = false
@@ -1319,7 +1340,7 @@ async function sendChat() {
     // - 有 @ 关联时只发关联文件内容，不发正文上下文
     // - 无 @ 关联时发用户消息 + 当前上下文（含正文摘要）
     if (hasLinked) {
-      userContent = `${userMsg}\n\n【@ 关联内容】\n${linkedContent}`
+      userContent = `${userMsg ? `【用户要求】\n${userMsg}\n\n` : ''}【@ 关联内容】\n${linkedContent}`
     } else {
       userContent = `${userMsg}\n\n【当前上下文】\n${ctx}`
     }
@@ -1342,7 +1363,7 @@ async function sendChat() {
         model: aiModel.value || project.value.settings.model,
         messages: [
           { role: 'system', content: sysContent },
-          ...chatMessages.value.slice(-6).map(m => ({ role: m.role as any, content: m.content })),
+          ...chatMessages.value.slice(0, -1).slice(-6).map(m => ({ role: m.role as any, content: m.content })),
           { role: 'user', content: userContent }
         ],
         temperature: 0.8,
