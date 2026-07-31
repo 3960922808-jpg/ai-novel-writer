@@ -3,7 +3,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-$repo = '3960922808-jpg/A-novel-writer'
+$repo = '3960922808-jpg/ai-novel-writer'
 $token = $env:GH_TOKEN
 if (-not $token) {
   Write-Host "ERROR: GH_TOKEN environment variable is not set." -ForegroundColor Red
@@ -26,6 +26,7 @@ $headers = @{
 # Locate packaged files
 $setupExe = Join-Path $PSScriptRoot "release\TrmWrite-Setup-$version.exe"
 $portableZip = Join-Path $PSScriptRoot "release\TrmWrite-$version-x64.zip"
+$portableExe = Join-Path $PSScriptRoot "release\TrmWrite-Portable-$version-x64.exe"
 
 $assets = @()
 if (Test-Path $setupExe) {
@@ -37,6 +38,11 @@ if (Test-Path $portableZip) {
   $assets += $portableZip
 } else {
   Write-Host "WARN: Portable zip not found at: $portableZip" -ForegroundColor Yellow
+}
+if (Test-Path $portableExe) {
+  $assets += $portableExe
+} else {
+  Write-Host "WARN: Portable exe not found at: $portableExe" -ForegroundColor Yellow
 }
 if ($assets.Count -eq 0) {
   Write-Host "ERROR: No exe files found. Run 'npm run build:win' first." -ForegroundColor Red

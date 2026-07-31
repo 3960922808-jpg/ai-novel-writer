@@ -1,6 +1,6 @@
 {
   "name": "a-novel-writer",
-  "version": "2.0.0",
+    "version": "2.0.1",
   "description": "TrmWrite - 本地优先的人工智能长篇小说创作工作台",
   "author": "TrmWrite",
   "packageManager": "pnpm@10.15.0",
@@ -73,16 +73,22 @@
             "x64"
           ]
         },
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
+                {
+                    "target": "nsis",
+                    "arch": [
+                        "x64"
+                    ]
+                },
+                {
+                    "target": "portable",
+                    "arch": [
+                        "x64"
+                    ]
+                }
       ],
       "artifactName": "TrmWrite-${version}-${arch}.${ext}"
     },
-    "nsis": {
+        "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
@@ -97,7 +103,10 @@
       "shortcutName": "TrmWrite",
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
-      "artifactName": "TrmWrite-Setup-${version}.${ext}"
-    }
+            "artifactName": "TrmWrite-Setup-${version}.${ext}"
+        },
+        "portable": {
+            "artifactName": "TrmWrite-Portable-${version}-${arch}.${ext}"
+        }
   }
 }

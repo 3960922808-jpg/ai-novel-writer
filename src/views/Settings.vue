@@ -311,7 +311,7 @@ async function checkNow() {
     }
     // 网络错误（所有 GitHub 源都失败）
     if (r.error) {
-      lastReleaseUrl = r.releaseUrl || 'https://github.com/3960922808-jpg/A-novel-writer/releases'
+      lastReleaseUrl = r.releaseUrl || 'https://github.com/3960922808-jpg/ai-novel-writer/releases'
       checkResult.value = `检查失败：${r.error}`
       ElMessage.warning(checkResult.value + '，可点击"查看发布页"手动下载')
       return
@@ -340,7 +340,7 @@ async function checkNow() {
 }
 
 function openReleases() {
-  const url = lastReleaseUrl || 'https://github.com/3960922808-jpg/A-novel-writer/releases'
+  const url = lastReleaseUrl || 'https://github.com/3960922808-jpg/ai-novel-writer/releases'
   window.open(url, '_blank')
 }
 

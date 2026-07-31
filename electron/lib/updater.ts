@@ -23,7 +23,7 @@ import path from 'node:path'
 import { Readable } from 'node:stream'
 import { spawn } from 'node:child_process'
 
-const REPO = '3960922808-jpg/A-novel-writer'
+const REPO = '3960922808-jpg/ai-novel-writer'
 // 多个 GitHub API 镜像源（依次尝试，提高国内访问成功率）
 const API_ENDPOINTS = [
   `https://api.github.com/repos/${REPO}/releases/latest`,
