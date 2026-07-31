@@ -7,6 +7,7 @@ import { registerAIIPC } from './ipc/ai'
 import { registerExportIPC } from './ipc/export'
 import { registerFileIPC } from './ipc/files'
 import { registerSearchIPC } from './ipc/search'
+import { registerObsidianIPC } from './ipc/obsidian'
 import { initDB } from './lib/db'
 import { startUpdater, checkOnce, downloadAndRestart, openDownloadInBrowser } from './lib/updater'
 
@@ -126,6 +127,7 @@ app.whenReady().then(async () => {
     registerExportIPC()
     registerFileIPC()
     registerSearchIPC()
+    registerObsidianIPC()
     // 手动检查更新 — 返回完整信息给前端展示
     ipcMain.handle('updater:check', async () => {
       const r = await checkOnce({ silent: false })

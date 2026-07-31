@@ -187,6 +187,8 @@ export interface AppSettings {
   themeMode?: 'light' | 'dark' | 'auto'
   // 界面缩放（百分比，70-150，类似浏览器缩放）
   zoomLevel?: number
+  // Obsidian 仓库目录，用于项目知识库与长期记忆双向同步
+  obsidianVaultPath?: string
 }
 
 /** Skill（技能）— 比普通提示词更高级的 AI 工作流 */

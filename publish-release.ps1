@@ -1,17 +1,9 @@
-# Publish packaged exe files to GitHub Releases
-# Usage:
-#   1. Set env:  $env:GH_TOKEN = "ghp_xxx"
-#   2. Bump version in package.json
-#   3. Run:      powershell -ExecutionPolicy Bypass -File publish-release.ps1
-#
-# This script will:
-#   - Read version from package.json
-#   - Create a GitHub Release tagged v<version> (updates if exists)
-#   - Upload Setup.exe and win-unpacked/TrmWrite.exe as release assets
+# 将安装包和免安装压缩包发布到 GitHub 版本页
+# 使用前设置 GH_TOKEN 环境变量并执行 npm run build:win
 
 $ErrorActionPreference = 'Stop'
 
-$repo = '3960922808-jpg/ai-novel-writer'
+$repo = '3960922808-jpg/A-novel-writer'
 $token = $env:GH_TOKEN
 if (-not $token) {
   Write-Host "ERROR: GH_TOKEN environment variable is not set." -ForegroundColor Red
@@ -32,8 +24,8 @@ $headers = @{
 }
 
 # Locate packaged files
-$setupExe = Join-Path $PSScriptRoot "release\TrmWrite Setup $version.exe"
-$unpackedExe = Join-Path $PSScriptRoot 'release\win-unpacked\TrmWrite.exe'
+$setupExe = Join-Path $PSScriptRoot "release\TrmWrite-Setup-$version.exe"
+$portableZip = Join-Path $PSScriptRoot "release\TrmWrite-$version-x64.zip"
 
 $assets = @()
 if (Test-Path $setupExe) {
@@ -41,10 +33,10 @@ if (Test-Path $setupExe) {
 } else {
   Write-Host "WARN: Setup exe not found at: $setupExe" -ForegroundColor Yellow
 }
-if (Test-Path $unpackedExe) {
-  $assets += $unpackedExe
+if (Test-Path $portableZip) {
+  $assets += $portableZip
 } else {
-  Write-Host "WARN: Unpacked exe not found at: $unpackedExe" -ForegroundColor Yellow
+  Write-Host "WARN: Portable zip not found at: $portableZip" -ForegroundColor Yellow
 }
 if ($assets.Count -eq 0) {
   Write-Host "ERROR: No exe files found. Run 'npm run build:win' first." -ForegroundColor Red
@@ -66,7 +58,7 @@ if (-not $release) {
   $body = @{
     tag_name    = $tagName
     name        = "TrmWrite $version"
-    body        = "版本 $version 发布。`n`n- 安装包：双击 Setup.exe 安装`n- 免安装版：直接运行 TrmWrite.exe"
+    body        = "版本 $version 发布。`n`n- 安装包：双击 Setup.exe 安装`n- 免安装版：解压 zip 后运行 TrmWrite.exe"
     draft       = $false
     prerelease  = $false
   } | ConvertTo-Json

@@ -1,83 +1,66 @@
-# TrmWrite · Windows 桌面版
+# TrmWrite 2
 
-AI 长篇小说创作工作台，基于 Electron + Vue 3。
+本地优先的人工智能长篇小说创作工作台，面向网文、类型小说与系列故事写作。项目基于原有 `ai-novel-writer` 重构，并借鉴墨枢的长篇叙事工程理念独立实现。
 
-## 🚀 快速开始（Windows）
+## 主要能力
 
-### 方式一：一键脚本（推荐小白）
+- 沉浸式章节编辑：自动保存、版本快照、续写、重写、润色、扩写和摘要。
+- 小说工程管理：章节、角色、地点、世界观、时间线、故事画布和写作目标。
+- 长篇一致性：当前状态、人物矩阵、伏笔、支线、情绪弧和章节摘要等真相文件。
+- Obsidian 记忆系统：将章节与知识库导出为 Markdown，并将 Obsidian 中修改的长期记忆导回应用。
+- 多模型接入：兼容采用 OpenAI 接口格式的服务，可配置多个服务商和模型。
+- 创作辅助：提示词库、技能库、文风蒸馏、拆书分析和多模型交叉评审。
+- 本地数据：创作数据存放在本机，不依赖云端账户；人工智能调用需要用户自行配置接口。
+- 多格式导出：Markdown、HTML、EPUB、DOCX 和 PDF。
 
-1. 解压本压缩包到任意目录（路径不要含中文/空格更稳）
-2. 双击 **`一键安装运行.bat`**
-3. 按提示选择：
-   - `1` = 开发模式直接运行
-   - `2` = 打包成 exe 安装包
+## Obsidian 同步
 
-### 方式二：手动命令
+1. 在项目侧栏进入“Obsidian 记忆”。
+2. 选择现有 Obsidian 仓库目录。
+3. 点击“双向同步”。应用会在仓库中创建 `TrmWrite/项目名-项目编号/`。
+4. 可在 Obsidian 的“记忆”目录编辑真相文件，之后再次双向同步导回应用。
 
-需要先装 [Node.js 18+](https://nodejs.org/zh-cn/download/)。
+同步目录包含项目主页、章节、记忆、设定、地点和时间线。文件使用稳定元数据关联应用记录，文件写入采用临时文件替换方式，降低同步中断导致损坏的风险。
 
-```bat
-:: 安装依赖
-npm install
+## 本地开发
 
-:: 方式 A：开发模式（开两个终端分别跑）
+需要 Node.js 20 或更高版本。
+
+```bash
+npm ci
 npm run dev
-npm run dev:electron
+```
 
-:: 方式 B：打包成 exe
+类型检查与生产构建：
+
+```bash
+npm run typecheck
+npm run build
+```
+
+## Windows 打包
+
+```bash
 npm run build:win
 ```
 
-打包完成后，`release\` 目录里会有 **`TrmWrite Setup 1.0.0.exe`**，双击即可安装。
+构建结果位于 `release/`：
 
-## 📖 使用流程
+- `TrmWrite-Setup-2.0.0.exe`：安装版。
+- `TrmWrite-2.0.0-x64.zip`：免安装压缩版。
 
-1. 启动应用 → 进入「设置」配置任一 AI 提供商的 API Key
-   - 支持 OpenAI / DeepSeek / 通义千问 / OpenRouter（任选其一）
-   - 国内用户推荐 DeepSeek（便宜）或通义千问（有免费额度）
-2. 「我的书架」→ 新建小说（可选玄幻/都市/科幻/历史模板）
-3. 章节列表 → 「AI 生成分章大纲」一键起手
-4. 进入写作界面，右侧 AI 助手点「续写」即可流式创作
-5. 长篇定期跑「AI 更新所有真相文件」+「AI 多模型评审」保证全书一致性
-6. 完成后「导出」EPUB / DOCX / PDF
+推送形如 `v2.0.0` 的标签后，GitHub 工作流会自动构建并把两种文件上传到对应版本页面。
 
-## ✨ 功能清单
+## 数据与安全
 
-- **核心创作**：Tiptap 富文本编辑器、流式 AI 续写/润色/重写/扩写/缩写/摘要
-- **章节管理**：拖拽排序、状态标记、AI 大纲生成、AI 章节摘要
-- **世界观**：角色库（含关系网+AI 批量生成）、地点、设定档案（按分类管理）
-- **故事规划**：时间线（关联章节/角色）、故事画布（节点拖拽+SVG 连线）
-- **AI 高级**：提示词库（10 个内置模板+自定义+测试）、AI 多模型交叉评审（参考 InkOS 理念）、7 个长期记忆真相文件
-- **写作追踪**：每日/周/月目标、90 天热力图、连续天数
-- **导出**：Markdown / HTML / EPUB / DOCX / PDF
-- **主题**：浅色/深色、字体大小、编辑器字体可调
-- **数据**：本地 JSON 存储，断网可用，隐私安全
+- 接口密钥仅保存在本机应用数据中，不应写入源码或提交到仓库。
+- Windows 默认数据位置为 `%APPDATA%/ainovelwriter/ainovelwriter/db.json`。
+- 在覆盖安装、迁移电脑或大规模同步前，建议备份该文件和 Obsidian 仓库。
 
-## 🛠 技术栈
+## 技术栈
 
-- Electron 31 + Vue 3.4 + TypeScript 5.5
-- Vite 5 + Pinia + Vue Router + Element Plus
-- Tiptap 2 富文本、lowdb 本地存储
-- electron-builder 打包 NSIS 安装包
+Electron、Vue 3、TypeScript、Vite、Pinia、Element Plus、Tiptap 和 lowdb。
 
-## ❓ 常见问题
-
-**Q: 打包时报 Electron 下载失败？**
-A: 网络问题。改用国内镜像：
-```bat
-set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
-npm run build:win
-```
-
-**Q: AI 调用报 401？**
-A: API Key 没配或填错。进「设置」→ 对应 provider → 填入 Key。
-
-**Q: 数据存在哪？**
-A: `%APPDATA%\ainovelwriter\db.json`，可备份。
-
-**Q: 离线能用吗？**
-A: 编辑/管理功能可离线，AI 功能需要联网调 API。
-
-## 📝 许可
+## 许可证
 
 MIT

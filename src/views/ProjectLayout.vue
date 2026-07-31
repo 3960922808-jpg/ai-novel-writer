@@ -52,7 +52,7 @@ import {
   EditPen, DataAnalysis, Document, Edit, User,
   Location, Collection, Timer, Connection,
   MagicStick, Trophy, ChatLineSquare, Files, Download, Setting, Fold, Expand,
-  CopyDocument, Reading
+  CopyDocument, Reading, Link
 } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { ElMessage } from 'element-plus'
@@ -81,6 +81,7 @@ const navItems = [
   { name: 'critics', label: 'AI 评审', icon: ChatLineSquare },
   { name: 'teardown', label: '拆书分析', icon: Reading },
   { name: 'truth', label: '真相文件', icon: Files },
+  { name: 'obsidian', label: 'Obsidian 记忆', icon: Link },
   { name: 'export', label: '导出', icon: Download },
   { name: 'project-settings', label: '项目设置', icon: Setting }
 ]

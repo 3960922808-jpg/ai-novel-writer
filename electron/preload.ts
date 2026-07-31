@@ -84,6 +84,16 @@ const api = {
     readSkillFolder: (folderPath: string) => ipcRenderer.invoke('file:read-skill-folder', folderPath)
   },
 
+  // ====== Obsidian 长期记忆 ======
+  obsidian: {
+    chooseVault: () => ipcRenderer.invoke('obsidian:choose-vault'),
+    status: (projectId: string) => ipcRenderer.invoke('obsidian:status', projectId),
+    exportProject: (projectId: string) => ipcRenderer.invoke('obsidian:export', projectId),
+    importMemory: (projectId: string) => ipcRenderer.invoke('obsidian:import-memory', projectId),
+    syncProject: (projectId: string) => ipcRenderer.invoke('obsidian:sync', projectId),
+    openProject: (projectId: string) => ipcRenderer.invoke('obsidian:open-project', projectId)
+  },
+
   // ====== 联网搜索 ======
   search: {
     web: (req: any) => ipcRenderer.invoke('search:web', req)
