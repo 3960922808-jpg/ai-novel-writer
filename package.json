@@ -1,6 +1,6 @@
 {
   "name": "a-novel-writer",
-    "version": "2.0.3",
+    "version": "2.0.4",
   "description": "TrmWrite - 本地优先的人工智能长篇小说创作工作台",
   "author": "TrmWrite",
   "packageManager": "pnpm@10.15.0",

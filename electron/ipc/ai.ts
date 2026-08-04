@@ -13,13 +13,46 @@ function safeSend(event: IpcMainInvokeEvent, chan: string, payload: string) {
   }
 }
 
+/**
+ * 从一个 SSE data 块里提取增量文本，兼容各种中转站/上游的非标准返回。
+ * 按优先级依次尝试常见字段路径：
+ *   1. OpenAI Chat Completions 流式：choices[0].delta.content
+ *   2. OpenAI Chat Completions 非流式混入：choices[0].message.content
+ *   3. Completions API：choices[0].text
+ *   4. 部分中转站直接返回 content / text / response 字段
+ * 返回空串表示该块无文本增量。
+ */
+function extractDelta(json: any): string {
+  if (!json || typeof json !== 'object') return ''
+  const choices = json.choices
+  if (Array.isArray(choices) && choices.length > 0) {
+    const c0 = choices[0]
+    if (c0 && typeof c0 === 'object') {
+      // 流式 delta
+      const d = c0.delta
+      if (d && typeof d === 'object' && typeof d.content === 'string') return d.content
+      if (d && typeof d === 'object' && typeof d.text === 'string') return d.text
+      // 非流式 message（部分中转站会在流里夹带完整 message）
+      const m = c0.message
+      if (m && typeof m === 'object' && typeof m.content === 'string') return m.content
+      // Completions API
+      if (typeof c0.text === 'string') return c0.text
+    }
+  }
+  // 顶层裸字段兜底
+  if (typeof json.content === 'string') return json.content
+  if (typeof json.text === 'string') return json.text
+  if (typeof json.response === 'string') return json.response
+  return ''
+}
+
 export function registerAIIPC() {
   // 流式聊天
   ipcMain.handle('ai:stream', async (event, req: AIRequest, chan: string) => {
     if (!req.baseUrl || !req.apiKey) {
       throw new Error('未配置 baseUrl 或 apiKey')
     }
-    const url = req.baseUrl.replace(/\/$/, '') + '/chat/completions'
+    const url = req.baseUrl.replace(/\/+$/, '') + '/chat/completions'
     const body: any = {
       model: req.model,
       messages: req.messages,
@@ -63,33 +96,79 @@ export function registerAIIPC() {
       const decoder = new TextDecoder('utf-8')
       let buffer = ''
       let full = ''
+      // 部分中转站不支持流式，会一次性返回完整 JSON（Content-Type: application/json，无 SSE）
+      // 收集非 SSE 响应体，结束后兜底解析
+      let nonStreamBody = ''
+      let looksLikeSSE = false
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
+        const chunkStr = decoder.decode(value, { stream: true })
+        buffer += chunkStr
+        // 只要出现 "data:" 就认为是 SSE 流
+        if (!looksLikeSSE && /(^|\n)\s*data:/i.test(buffer)) looksLikeSSE = true
+        // 兼容 \r\n 与 \n：统一按 \n 切
+        const lines = buffer.split(/\r?\n/)
         buffer = lines.pop() || ''
         for (const line of lines) {
           const t = line.trim()
-          if (!t || !t.startsWith('data:')) continue
-          const data = t.slice(5).trim()
-          if (data === '[DONE]') {
+          if (!t) continue
+          // SSE 注释行（如 ": keep-alive"）直接跳过
+          if (t.startsWith(':')) continue
+          // 兼容 data: / data:{...} / data: {...}（大小写不敏感）
+          const dm = t.match(/^data\s*:\s*(.*)$/i)
+          if (!dm) {
+            // 非 data 行：如果既不是注释也不是 data，可能是非 SSE 响应，累积起来
+            if (!looksLikeSSE) nonStreamBody += t + '\n'
+            continue
+          }
+          const data = dm[1].trim()
+          if (!data) continue
+          // [DONE] 标记（兼容大小写、空格）
+          if (/^\[?done\]?$/i.test(data)) {
             safeSend(event, chan, '')
             return full
           }
           try {
             const json = JSON.parse(data)
-            const delta = json.choices?.[0]?.delta?.content || ''
+            const delta = extractDelta(json)
             if (delta) {
               full += delta
               safeSend(event, chan, delta)
             }
           } catch {
-            // 忽略解析错误
+            // JSON 解析失败：可能是中转站直接返回纯文本增量
+            // 排除明显的错误响应（以 { 开头但解析失败的，留到非流式兜底）
+            if (!data.startsWith('{') && !data.startsWith('[')) {
+              full += data
+              safeSend(event, chan, data)
+            }
           }
         }
       }
+
+      // 流结束后，如果整段都不是 SSE（中转站不支持 stream 一次性返回 JSON）
+      if (!looksLikeSSE && !full) {
+        const tail = (buffer + (nonStreamBody || '')).trim()
+        if (tail) {
+          try {
+            const json = JSON.parse(tail)
+            const text = extractDelta(json) || json.choices?.[0]?.message?.content || ''
+            if (text) {
+              full = text
+              safeSend(event, chan, text)
+            }
+          } catch {
+            // 纯文本响应
+            if (tail && !tail.startsWith('{') && !tail.startsWith('<')) {
+              full = tail
+              safeSend(event, chan, tail)
+            }
+          }
+        }
+      }
+
       return full
     } catch (err: any) {
       if (aborted) return ''
@@ -106,7 +185,7 @@ export function registerAIIPC() {
       throw new Error('未配置 baseUrl 或 apiKey')
     }
     try {
-      const url = req.baseUrl.replace(/\/$/, '') + '/chat/completions'
+      const url = req.baseUrl.replace(/\/+$/, '') + '/chat/completions'
       const resp = await fetch(url, {
         method: 'POST',
         headers: {
@@ -127,7 +206,7 @@ export function registerAIIPC() {
         throw new Error(`API ${resp.status}: ${txt.slice(0, 500) || resp.statusText}`)
       }
       const json = await resp.json()
-      return json.choices?.[0]?.message?.content || ''
+      return extractDelta(json) || json.choices?.[0]?.message?.content || ''
     } catch (e: any) {
       // 保留原始错误信息，避免前端再包装一次造成"AI 请求失败：AI 请求失败：API 401"
       throw e
