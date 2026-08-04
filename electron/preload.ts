@@ -99,6 +99,17 @@ const api = {
     web: (req: any) => ipcRenderer.invoke('search:web', req)
   },
 
+  // ====== 扫榜（榜单/详情/章节抓取） ======
+  sweep: {
+    fetch: (url: string, opts?: { referer?: string; timeout?: number; asJson?: boolean }) =>
+      ipcRenderer.invoke('sweep:fetch', url, opts || undefined),
+    fetchBatch: (
+      urls: string[],
+      opts?: { referer?: string; timeout?: number; asJson?: boolean; concurrency?: number }
+    ) =>
+      ipcRenderer.invoke('sweep:fetchBatch', urls, opts || undefined)
+  },
+
   // ====== 更新检查 ======
   updater: {
     // 手动触发一次检查

@@ -8,6 +8,7 @@ dist-electron/
 release/
 release-v2/
 release-*/
+portable-test-*/
 ai/
 *.app
 *.exe

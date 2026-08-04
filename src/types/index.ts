@@ -189,6 +189,10 @@ export interface AppSettings {
   zoomLevel?: number
   // Obsidian 仓库目录，用于项目知识库与长期记忆双向同步
   obsidianVaultPath?: string
+  // 自定义背景图（base64 data URL），为空则使用纯色主题
+  wallpaper?: string
+  // 背景图毛玻璃模糊度（0-40px，越大越模糊，默认 20）
+  wallpaperBlur?: number
 }
 
 /** Skill（技能）— 比普通提示词更高级的 AI 工作流 */

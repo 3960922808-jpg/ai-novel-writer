@@ -52,7 +52,7 @@ import {
   EditPen, DataAnalysis, Document, Edit, User,
   Location, Collection, Timer, Connection,
   MagicStick, Trophy, ChatLineSquare, Files, Download, Setting, Fold, Expand,
-  CopyDocument, Reading, Link
+  CopyDocument, Reading, Link, ChatDotRound, TrendCharts
 } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { ElMessage } from 'element-plus'
@@ -74,12 +74,14 @@ const navItems = [
   { name: 'lore', label: '世界观', icon: Collection },
   { name: 'timeline', label: '时间线', icon: Timer },
   { name: 'canvas', label: '故事画布', icon: Connection },
+  { name: 'chat', label: '设定对话', icon: ChatDotRound },
   { name: 'skills', label: '技能库', icon: MagicStick },
   { name: 'distill', label: '蒸馏文风', icon: CopyDocument },
   { name: 'prompts', label: '提示词库', icon: EditPen },
   { name: 'goals', label: '写作目标', icon: Trophy },
   { name: 'critics', label: 'AI 评审', icon: ChatLineSquare },
   { name: 'teardown', label: '拆书分析', icon: Reading },
+  { name: 'sweep', label: '扫榜拆解', icon: TrendCharts },
   { name: 'truth', label: '真相文件', icon: Files },
   { name: 'obsidian', label: 'Obsidian 记忆', icon: Link },
   { name: 'export', label: '导出', icon: Download },

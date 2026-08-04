@@ -17,6 +17,7 @@ export interface DBShape {
   versions: any[]
   skills: any[]
   styleProfiles: any[]
+  messages: any[]
   settings: any | null
 }
 
@@ -34,6 +35,7 @@ export const defaultData: DBShape = {
   versions: [],
   skills: [],
   styleProfiles: [],
+  messages: [],
   settings: null
 }
 

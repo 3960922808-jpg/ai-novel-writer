@@ -1,4 +1,4 @@
-# TrmWrite 2
+# TrmWrite 2.0.1
 
 本地优先的人工智能长篇小说创作工作台，面向网文、类型小说与系列故事写作。项目基于原有 `ai-novel-writer` 重构，并借鉴墨枢的长篇叙事工程理念独立实现。
 
@@ -46,10 +46,11 @@ npm run build:win
 
 构建结果位于 `release/`：
 
-- `TrmWrite-Setup-2.0.0.exe`：安装版。
-- `TrmWrite-2.0.0-x64.zip`：免安装压缩版。
+- `TrmWrite-Setup-2.0.1.exe`：安装版。
+- `TrmWrite-2.0.1-x64.zip`：免安装压缩版，解压后运行。
+- `TrmWrite-Portable-2.0.1-x64.exe`：单文件便携版，无需安装和解压。
 
-推送形如 `v2.0.0` 的标签后，GitHub 工作流会自动构建并把两种文件上传到对应版本页面。
+推送形如 `v2.0.1` 的标签后，GitHub 工作流会自动构建并把三种文件上传到对应版本页面。
 
 ## 数据与安全
 

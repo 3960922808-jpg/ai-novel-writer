@@ -1,4 +1,8 @@
 <template>
+  <!-- 自定义背景图层（毛玻璃）：位于所有内容之下，有壁纸时显示 -->
+  <div class="app-wallpaper-layer"></div>
+  <div class="app-wallpaper-overlay"></div>
+
   <router-view />
 
   <!-- 发现新版本对话框：提供"用浏览器下载"按钮，让用户用浏览器/IDM/迅雷下载 -->

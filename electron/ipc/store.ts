@@ -6,7 +6,7 @@ const COLLECTIONS = [
   'chapters', 'locations', 'lore',
   'timeline', 'canvas', 'prompts', 'goals',
   'truths', 'critiques', 'versions',
-  'skills', 'styleProfiles'
+  'skills', 'styleProfiles', 'messages'
 ]
 
 export function registerStoreIPC() {

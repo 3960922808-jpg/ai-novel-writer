@@ -15,9 +15,13 @@
   --warning: #f59e0b;
   --danger: #ef4444;
   --shadow: 0 1px 3px rgba(0,0,0,0.03), 0 2px 8px rgba(0,0,0,0.04);
+  --shadow-hover: 0 4px 12px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.05);
   --radius: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
+  /* 背景图相关变量（由 settings.applyWallpaper 设置） */
+  --app-wallpaper: none;
+  --app-wallpaper-blur: 20px;
 }
 
 html.dark {
@@ -33,6 +37,7 @@ html.dark {
   --primary-dark: #5b9bd5;
   --accent: #7db9e8;
   --shadow: 0 1px 3px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.3);
+  --shadow-hover: 0 4px 12px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.4);
 }
 
 * { box-sizing: border-box; }
@@ -46,6 +51,47 @@ html, body, #app {
   color: var(--text);
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.3s ease;
+}
+
+/* ====== 自定义背景图层（毛玻璃） ======
+ * 有壁纸时（html.has-wallpaper）：
+ *   - 背景层显示图片并模糊
+ *   - 遮罩层叠加半透明色，增强可读性
+ *   - body 的 --bg 已被 applyWallpaper 覆盖为半透明，自然透出模糊背景
+ */
+.app-wallpaper-layer {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background-image: var(--app-wallpaper, none);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: blur(var(--app-wallpaper-blur, 20px));
+  /* 放大 10% 防止模糊后边缘漏白 */
+  transform: scale(1.1);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+html.has-wallpaper .app-wallpaper-layer {
+  opacity: 1;
+}
+.app-wallpaper-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: rgba(255, 255, 255, 0.2);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+html.has-wallpaper .app-wallpaper-overlay {
+  opacity: 1;
+}
+html.has-wallpaper.dark .app-wallpaper-overlay {
+  background: rgba(0, 0, 0, 0.3);
 }
 
 /* 滚动条 */
@@ -84,12 +130,18 @@ html.dark ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); }
 .text-muted { color: var(--text-2); }
 .text-faint { color: var(--text-3); }
 
-/* 卡片 */
+/* 卡片 — 毛玻璃模式下自动透出背景 */
 .card {
   background: var(--panel);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
-  box-shadow: none;
+  box-shadow: var(--shadow);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, background-color 0.3s ease;
+}
+html.has-wallpaper .card {
+  /* 有壁纸时增强毛玻璃质感 */
+  backdrop-filter: blur(12px) saturate(1.1);
+  -webkit-backdrop-filter: blur(12px) saturate(1.1);
 }
 
 /* 页面容器 */
@@ -146,9 +198,12 @@ html.dark ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); }
   font-size: 14px;
   font-family: inherit;
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-.input:focus, .textarea:focus { border-color: var(--primary); }
+.input:focus, .textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
 .textarea { resize: vertical; min-height: 80px; }
 
 /* 标签 */
@@ -187,6 +242,47 @@ html.dark ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); }
   --el-button-hover-border-color: var(--primary-dark);
 }
 .el-button--primary:hover { opacity: 0.9; }
+
+/* ====== 通用对话气泡样式（Editor / ChatSettings 共用风格） ======
+ * 用户消息：主色气泡，右对齐
+ * AI 消息：卡片式，左对齐，带边框与微阴影
+ * 两处页面用各自 scoped 覆盖细节，但基础变量统一
+ */
+.chat-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.chat-msg-role {
+  font-size: 11px;
+  color: var(--text-3);
+  font-weight: 600;
+  padding: 0 2px;
+}
+.chat-msg-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.7;
+}
+.ai-output-card {
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: box-shadow 0.18s ease, border-color 0.18s ease;
+}
+.ai-output-card:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-hover);
+}
+/* 有壁纸时给对话卡片更强的毛玻璃感 */
+html.has-wallpaper .ai-output-card {
+  backdrop-filter: blur(8px) saturate(1.2);
+  -webkit-backdrop-filter: blur(8px) saturate(1.2);
+}
 
 /* 编辑器 prose */
 .prose {

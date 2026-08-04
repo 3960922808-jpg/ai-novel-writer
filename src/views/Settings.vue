@@ -58,6 +58,36 @@
             像浏览器一样整体缩放界面（70%-150%），切换立即生效
           </span>
         </el-form-item>
+
+        <el-form-item label="背景图片">
+          <div class="wallpaper-row">
+            <div class="wallpaper-preview" :style="wallpaperPreviewStyle">
+              <el-icon v-if="!form.wallpaper" :size="28" color="#cbd5e1"><Picture /></el-icon>
+            </div>
+            <div class="wallpaper-actions">
+              <el-button size="small" :icon="Upload" @click="pickWallpaper">上传图片</el-button>
+              <el-button
+                v-if="form.wallpaper"
+                size="small"
+                :icon="Delete"
+                @click="removeWallpaper"
+              >移除背景</el-button>
+              <span class="text-faint text-xs">
+                上传后呈毛玻璃效果，既能看清又有点看不清
+              </span>
+            </div>
+          </div>
+        </el-form-item>
+
+        <el-form-item label="背景模糊度" v-if="form.wallpaper">
+          <div class="slider-row">
+            <el-slider v-model="form.wallpaperBlur" :min="0" :max="40" :step="1" style="flex: 1" @input="onWallpaperBlurChange" />
+            <span class="slider-val">{{ form.wallpaperBlur }}px</span>
+          </div>
+          <span class="text-faint text-xs" style="display:block; margin-top:2px">
+            数值越大背景越模糊，0=清晰可见，40=高度模糊
+          </span>
+        </el-form-item>
       </div>
 
       <div class="card section-card">
@@ -94,9 +124,21 @@
                       <div class="quick-desc text-faint text-xs">MiniMax-M3 / M2.7 系列</div>
                     </div>
                   </el-dropdown-item>
-                  <el-dropdown-item command="custom" divided>
+                  <el-dropdown-item command="apikl">
                     <div class="quick-item">
-                      <div class="quick-name">自定义 Provider</div>
+                      <div class="quick-name">APIKL 中转站（Grok）</div>
+                      <div class="quick-desc text-faint text-xs">api.apikl.ai · grok-4.5 等</div>
+                    </div>
+                  </el-dropdown-item>
+                  <el-dropdown-item command="relay" divided>
+                    <div class="quick-item">
+                      <div class="quick-name">中转站 / 自定义接口</div>
+                      <div class="quick-desc text-faint text-xs">任意 BaseURL + API Key（含中转站、自建网关）</div>
+                    </div>
+                  </el-dropdown-item>
+                  <el-dropdown-item command="custom">
+                    <div class="quick-item">
+                      <div class="quick-name">空白 Provider</div>
                       <div class="quick-desc text-faint text-xs">手动填写所有信息</div>
                     </div>
                   </el-dropdown-item>
@@ -106,13 +148,39 @@
           </div>
         </div>
         <div class="text-faint text-xs" style="margin-bottom: 12px">
-          模型只能通过下方 API 配置管理。第一个配置了 API Key 的 Provider 将作为默认使用。
+          模型只能通过下方 API 配置管理。<span style="color: var(--text-2)">支持同时保留多个 Provider 与模型配置，互不影响</span> —— 第一个「已就绪」（填了 API Key 且有模型）的将作为默认使用。
+          支持任意 OpenAI 兼容接口，可直接填入<span style="color: var(--text-2)">中转站</span>地址与对应 Key。
+        </div>
+
+        <!-- 可用模型总览：直观展示多个模型共存 -->
+        <div v-if="readyProviders.length > 0" class="ready-overview">
+          <div class="ready-overview-head">
+            <el-icon class="ready-icon"><CircleCheck /></el-icon>
+            <span class="ready-overview-title">当前可用模型总览</span>
+            <el-tag size="small" type="success" effect="dark">
+              {{ readyProviders.length }} 个 Provider · {{ readyModelCount }} 个模型
+            </el-tag>
+          </div>
+          <div class="ready-models-list">
+            <span v-for="m in allReadyModels" :key="m" class="ready-model-chip">{{ m }}</span>
+          </div>
+          <div class="text-faint text-xs ready-overview-tip">
+            这些模型可在写作、设定对话等功能中直接选用，新增配置不会清除已有模型。
+          </div>
+        </div>
+        <div v-else class="ready-overview empty">
+          <el-icon class="ready-icon"><InfoFilled /></el-icon>
+          <span class="text-faint text-xs">还没有「已就绪」的模型配置，请添加 Provider 并填写 API Key 与模型</span>
         </div>
 
         <div v-for="(p, idx) in form.apiKeys" :key="idx" class="provider-card">
           <div class="provider-header">
             <el-input v-model="p.provider" size="small" style="width: 180px" placeholder="Provider 名称" />
-            <el-tag size="small" effect="plain">{{ p.models.length }} 个模型</el-tag>
+            <el-tag
+              size="small"
+              :type="providerStatus(p).ok ? 'success' : 'info'"
+              effect="light"
+            >{{ providerStatus(p).label }} · {{ p.models.length }} 个模型</el-tag>
             <div class="provider-actions">
               <el-button
                 size="small"
@@ -126,11 +194,20 @@
 
           <div v-if="testResults[idx]" class="test-result" :class="testResults[idx].ok ? 'ok' : 'fail'">
             <el-icon><CircleCheck v-if="testResults[idx].ok" /><CircleClose v-else /></el-icon>
-            <span>{{ testResults[idx].msg }}</span>
+            <span class="test-result-msg">{{ testResults[idx].msg }}</span>
+            <span
+              v-if="testResults[idx].latency !== undefined"
+              class="test-latency-badge"
+              :class="latencyLevel(testResults[idx].latency)"
+              :title="'接口延迟 ' + testResults[idx].latency + ' ms'"
+            >{{ testResults[idx].latency }} ms</span>
           </div>
 
           <el-form-item label="BaseURL">
-            <el-input v-model="p.baseUrl" placeholder="API 地址，如 https://api.openai.com/v1" />
+            <el-input v-model="p.baseUrl" placeholder="API 地址，如 https://api.openai.com/v1；中转站填其分配的地址，结尾保留 /v1" />
+            <div class="text-faint text-xs" style="margin-top: 4px">
+              支持官方接口与任意 OpenAI 兼容中转站 / 自建网关，结尾需包含版本号（如 /v1）
+            </div>
           </el-form-item>
 
           <el-form-item label="API Key">
@@ -256,12 +333,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, nextTick, onMounted } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, watch, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   ArrowLeft, ArrowDown, Check, Plus, Sunny, Moon, Refresh, Monitor, Link,
-  Connection, Delete, CircleCheck, CircleClose
+  Connection, Delete, CircleCheck, CircleClose, InfoFilled, Upload, Picture
 } from '@element-plus/icons-vue'
 import { useSettingsStore } from '@/stores/settings'
 import type { AppSettings } from '@/types'
@@ -287,8 +364,10 @@ const form = reactive<AppSettings>({
   autoUpdateCheck: true,
   lastCommitSha: '',
   askMode: 'auto',
-  zoomLevel: 100
-})
+    zoomLevel: 100,
+    wallpaper: '',
+    wallpaperBlur: 20
+  })
 
 // 当前版本号 — 从 package.json 注入到 vite define 或回退到 1.0.0
 const currentVersion = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_APP_VERSION) || '1.0.0'
@@ -311,7 +390,7 @@ async function checkNow() {
     }
     // 网络错误（所有 GitHub 源都失败）
     if (r.error) {
-      lastReleaseUrl = r.releaseUrl || 'https://github.com/3960922808-jpg/A-novel-writer/releases'
+      lastReleaseUrl = r.releaseUrl || 'https://github.com/3960922808-jpg/ai-novel-writer/releases'
       checkResult.value = `检查失败：${r.error}`
       ElMessage.warning(checkResult.value + '，可点击"查看发布页"手动下载')
       return
@@ -340,7 +419,7 @@ async function checkNow() {
 }
 
 function openReleases() {
-  const url = lastReleaseUrl || 'https://github.com/3960922808-jpg/A-novel-writer/releases'
+  const url = lastReleaseUrl || 'https://github.com/3960922808-jpg/ai-novel-writer/releases'
   window.open(url, '_blank')
 }
 
@@ -350,7 +429,33 @@ const modelInputRefs = ref<any[] | null>(null)
 
 // 测试连通性状态
 const testingIdx = ref<number | null>(null)
-const testResults = ref<Record<number, { ok: boolean; msg: string }>>({})
+const testResults = ref<Record<number, { ok: boolean; msg: string; latency?: number }>>({})
+
+// 根据延迟数值划分等级，用于徽章配色：<=300ms 优秀，<=800ms 良好，>800ms 较慢
+function latencyLevel(ms: number): string {
+  if (ms <= 300) return 'fast'
+  if (ms <= 800) return 'ok'
+  return 'slow'
+}
+
+// 多模型共存：已就绪的 Provider（填了 API Key 且至少 1 个模型）
+type ApiKeyCfg = AppSettings['apiKeys'][number]
+const readyProviders = computed<ApiKeyCfg[]>(() =>
+  form.apiKeys.filter(p => p.apiKey && p.apiKey.trim() && p.models.length > 0)
+)
+const readyModelCount = computed(() => readyProviders.value.reduce((n, p) => n + p.models.length, 0))
+const allReadyModels = computed(() => {
+  const r: string[] = []
+  for (const p of readyProviders.value) r.push(...p.models)
+  return r
+})
+// 单个 Provider 的就绪状态徽章
+function providerStatus(p: ApiKeyCfg): { ok: boolean; label: string } {
+  if (p.apiKey && p.apiKey.trim() && p.models.length > 0) return { ok: true, label: '已就绪' }
+  if (!p.apiKey && p.models.length === 0) return { ok: false, label: '未配置' }
+  if (!p.apiKey) return { ok: false, label: '缺 API Key' }
+  return { ok: false, label: '缺模型' }
+}
 
 // 大模型快速设置预设
 interface ProviderPreset {
@@ -398,6 +503,16 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
     // 2026 年 M3（06 月发布，1M 上下文）+ M2.7（03 月发布，200K 上下文）
     models: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.5'],
     website: 'https://platform.minimaxi.com/user-center/basic-information/interface-key'
+  },
+  {
+    key: 'apikl',
+    label: 'APIKL 中转站（Grok）',
+    provider: 'APIKL',
+    // OpenAI 兼容中转站，端点固定 https://api.apikl.ai/v1
+    baseUrl: 'https://api.apikl.ai/v1',
+    // 实测支持的模型：grok-4.5（grok-3 已被官方下线，会报 model_not_found）
+    models: ['grok-4.5'],
+    website: 'https://api.apikl.ai'
   }
 ]
 
@@ -405,6 +520,21 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
 function quickAddProvider(cmd: string) {
   if (cmd === 'custom' || !cmd) {
     addProvider()
+    return
+  }
+  // 中转站 / 自定义接口：填入占位 baseUrl 与提示，等用户改写
+  if (cmd === 'relay') {
+    if (form.apiKeys.some(p => p.provider === '中转站')) {
+      ElMessage.warning('已存在「中转站」配置，请直接在下方填写 BaseURL 与 API Key')
+      return
+    }
+    form.apiKeys.push({
+      provider: '中转站',
+      baseUrl: '',
+      apiKey: '',
+      models: []
+    })
+    ElMessage.success('已添加中转站配置，请填入中转站分配的 BaseURL 与 API Key（兼容 OpenAI 接口即可）')
     return
   }
   const preset = PROVIDER_PRESETS.find(p => p.key === cmd)
@@ -417,6 +547,7 @@ function quickAddProvider(cmd: string) {
     ElMessage.warning(`${preset.label} 已存在，请直接在下方填写 API Key`)
     return
   }
+  // APIKL 中转站不再内置 Key（公开 Key 易被滥用/失效），统一由用户自行填写
   form.apiKeys.push({
     provider: preset.provider,
     baseUrl: preset.baseUrl,
@@ -446,7 +577,7 @@ function removeProvider(idx: number) {
   form.apiKeys.splice(idx, 1)
 }
 
-// 测试 Provider 连通性
+// 测试 Provider 连通性（含延迟测量，单位 ms）
 async function testConnection(idx: number) {
   const p = form.apiKeys[idx]
   if (!p.baseUrl) {
@@ -454,15 +585,18 @@ async function testConnection(idx: number) {
     return
   }
   testingIdx.value = idx
+  const t0 = performance.now()
   try {
     const url = p.baseUrl.replace(/\/+$/, '') + '/models'
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (p.apiKey) headers['Authorization'] = `Bearer ${p.apiKey}`
     const res = await fetch(url, { method: 'GET', headers })
+    const latency = Math.round(performance.now() - t0)
     if (!res.ok) {
       const text = await res.text().catch(() => '')
       testResults.value[idx] = {
         ok: false,
+        latency,
         msg: `HTTP ${res.status} ${res.statusText}${text ? ' · ' + text.slice(0, 80) : ''}`
       }
       return
@@ -476,14 +610,17 @@ async function testConnection(idx: number) {
       if (newIds.length > 0) p.models.push(...newIds)
       testResults.value[idx] = {
         ok: true,
+        latency,
         msg: `连通成功 · 共 ${ids.length} 个模型${newIds.length > 0 ? ` · 已自动添加 ${newIds.length} 个新模型` : ''}`
       }
     } else {
-      testResults.value[idx] = { ok: true, msg: '连通成功（响应未返回模型列表，但 API 可用）' }
+      testResults.value[idx] = { ok: true, latency, msg: '连通成功（响应未返回模型列表，但 API 可用）' }
     }
   } catch (e: any) {
+    const latency = Math.round(performance.now() - t0)
     testResults.value[idx] = {
       ok: false,
+      latency,
       msg: '连接失败：' + (e?.message || '网络错误')
     }
   } finally {
@@ -508,6 +645,7 @@ onMounted(async () => {
 })
 
 function fillForm(s: AppSettings) {
+  autoSaveReady.value = false
   Object.assign(form, JSON.parse(JSON.stringify(s)))
   if (!Array.isArray(form.apiKeys)) form.apiKeys = []
   // 老数据兼容
@@ -523,6 +661,11 @@ function fillForm(s: AppSettings) {
   if (!form.askMode) form.askMode = 'auto'
   // zoomLevel 兼容
   if (form.zoomLevel === undefined || form.zoomLevel === null) form.zoomLevel = 100
+  // wallpaper 兼容
+  if (!form.wallpaper) form.wallpaper = ''
+  if (form.wallpaperBlur === undefined || form.wallpaperBlur === null) form.wallpaperBlur = 20
+  // 表单填充完成后再开启自动保存，避免初始化赋值触发回写
+  nextTick(() => { autoSaveReady.value = true })
 }
 
 function onThemeChange() {
@@ -538,6 +681,44 @@ function onFontChange() {
 function onZoomChange() {
   // 界面缩放实时生效（像浏览器一样）
   settingsStore.update({ zoomLevel: form.zoomLevel })
+}
+
+// ===== 自定义背景图（毛玻璃） =====
+const wallpaperPreviewStyle = computed(() => {
+  if (!form.wallpaper) return {}
+  return {
+    backgroundImage: `url("${form.wallpaper}")`,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center'
+  }
+})
+
+async function pickWallpaper() {
+  try {
+    const filePath = await window.api.file.selectImage()
+    if (!filePath) return
+    // 读取为 base64 data URL（持久化到 settings，跨设备一致）
+    const dataUrl = await window.api.file.readImageBase64(filePath)
+    if (!dataUrl) {
+      ElMessage.error('读取图片失败')
+      return
+    }
+    form.wallpaper = dataUrl
+    await settingsStore.update({ wallpaper: dataUrl, wallpaperBlur: form.wallpaperBlur })
+    ElMessage.success('背景图已设置')
+  } catch (e: any) {
+    ElMessage.error('上传失败：' + (e?.message || '未知错误'))
+  }
+}
+
+function removeWallpaper() {
+  form.wallpaper = ''
+  settingsStore.update({ wallpaper: '' })
+  ElMessage.success('已移除背景图')
+}
+
+function onWallpaperBlurChange() {
+  settingsStore.update({ wallpaperBlur: form.wallpaperBlur })
 }
 
 function showModelInput(idx: number) {
@@ -584,7 +765,9 @@ async function save() {
       searchProvider: form.searchProvider,
       searchApiKey: form.searchApiKey,
       autoUpdateCheck: form.autoUpdateCheck,
-      zoomLevel: form.zoomLevel
+      zoomLevel: form.zoomLevel,
+      wallpaper: form.wallpaper,
+      wallpaperBlur: form.wallpaperBlur
     })
     ElMessage.success('已保存')
   } catch (e: any) {
@@ -593,6 +776,50 @@ async function save() {
     saving.value = false
   }
 }
+
+// ===== API / 模型配置自动保存 =====
+// 修复：模型配置只有点击"保存设置"才会持久化，用户改完直接重启会丢失。
+// 这里对 apiKeys 做防抖自动保存，确保任何改动（新增 Provider / 填 Key / 增删模型）
+// 都在停止输入后自动落盘，重启不再丢失。
+const autoSaveReady = ref(false)
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
+let pendingAutoSave: Promise<any> | null = null
+
+async function autoSaveApiKeys() {
+  // 校验：至少一个 Provider 有 Key 且有模型才写回，避免把空配置覆盖到磁盘
+  const hasKey = form.apiKeys.some(p => p.apiKey && p.apiKey.trim() && p.models.length > 0)
+  if (!hasKey) return
+  try {
+    pendingAutoSave = settingsStore.update({
+      apiKeys: JSON.parse(JSON.stringify(form.apiKeys))
+    })
+    await pendingAutoSave
+  } catch (e: any) {
+    // 自动保存失败不打扰用户，仅控制台记录（手动保存仍会提示）
+    console.error('[settings] 模型配置自动保存失败:', e?.message || e)
+  } finally {
+    pendingAutoSave = null
+  }
+}
+
+watch(
+  () => form.apiKeys,
+  () => {
+    if (!autoSaveReady.value) return
+    if (autoSaveTimer) clearTimeout(autoSaveTimer)
+    autoSaveTimer = setTimeout(autoSaveApiKeys, 800)
+  },
+  { deep: true }
+)
+
+// 离开页面前 flush 掉挂起的自动保存，防止最后 800ms 内的改动丢失
+onBeforeUnmount(() => {
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer)
+    autoSaveTimer = null
+    autoSaveApiKeys()
+  }
+})
 </script>
 
 <style scoped>
@@ -638,6 +865,30 @@ async function save() {
   color: var(--text-2);
   font-size: 13px;
 }
+.wallpaper-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+}
+.wallpaper-preview {
+  width: 88px;
+  height: 56px;
+  border-radius: 6px;
+  border: 1px dashed var(--border);
+  background: var(--panel-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.wallpaper-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
 .provider-card {
   padding: 16px;
   border: 1px solid var(--border);
@@ -647,6 +898,60 @@ async function save() {
 }
 .provider-card:last-child {
   margin-bottom: 0;
+}
+/* 可用模型总览 */
+.ready-overview {
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border-radius: var(--radius);
+  background: rgba(16, 185, 129, 0.06);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+.ready-overview.empty {
+  background: var(--panel-2);
+  border: 1px dashed var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ready-overview.empty .ready-icon {
+  color: var(--text-3);
+}
+.ready-overview-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.ready-icon {
+  color: #10b981;
+  font-size: 16px;
+}
+.ready-overview-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.ready-models-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.ready-model-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: 12px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.ready-overview-tip {
+  margin-top: 2px;
 }
 .provider-header {
   display: flex;
@@ -710,6 +1015,35 @@ async function save() {
   background: rgba(239, 68, 68, 0.08);
   color: #ef4444;
   border: 1px solid rgba(239, 68, 68, 0.3);
+}
+.test-result-msg {
+  flex: 1;
+  min-width: 0;
+}
+.test-latency-badge {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.test-latency-badge.fast {
+  background: rgba(16, 185, 129, 0.18);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+.test-latency-badge.ok {
+  background: rgba(245, 158, 11, 0.18);
+  color: #d97706;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+.test-latency-badge.slow {
+  background: rgba(239, 68, 68, 0.15);
+  color: #dc2626;
+  border: 1px solid rgba(239, 68, 68, 0.4);
 }
 .provider-name {
   font-weight: 600;

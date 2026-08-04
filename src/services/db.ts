@@ -10,7 +10,7 @@ type Collection =
   | 'chapters' | 'locations' | 'lore'
   | 'timeline' | 'canvas' | 'prompts' | 'goals'
   | 'truths' | 'critiques' | 'versions'
-  | 'skills' | 'styleProfiles'
+  | 'skills' | 'styleProfiles' | 'messages'
 
 const C = window.api.store
 
@@ -126,4 +126,57 @@ export const StyleProfiles = {
   list: (pid: string) => list<StyleProfile>('styleProfiles', pid),
   save: (s: Partial<StyleProfile> & { name: string }) => save('styleProfiles', s),
   remove: (id: string) => remove('styleProfiles', id)
+}
+
+// ====== 对话历史（按 projectId + sessionId 持久化） ======
+// Editor.vue 的 sessionId = chapterId（每章独立对话）
+// ChatSettings.vue 的 sessionId = 'settings'（设定对话）
+export interface ChatMessageRecord {
+  id: string
+  projectId: string
+  sessionId: string
+  role: 'user' | 'assistant'
+  content: string
+  options?: Array<{ text: string; isCustom?: boolean }>
+  selectedOption?: number
+  isQuestion?: boolean
+  createdAt: number
+}
+export const Messages = {
+  /** 拉取某项目下所有消息（前端再按 sessionId 过滤） */
+  list: (pid: string) => list<ChatMessageRecord>('messages', pid),
+  /** 拉取某项目下某会话的消息，按时间正序 */
+  async listBySession(pid: string, sessionId: string): Promise<ChatMessageRecord[]> {
+    const all = await list<ChatMessageRecord>('messages', pid)
+    return all
+      .filter(m => m.sessionId === sessionId)
+      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+  },
+  /** 列出某项目下所有有消息的会话（用于历史记录列表） */
+  async listSessions(pid: string): Promise<Array<{ sessionId: string; count: number; lastTime: number }>> {
+    const all = await list<ChatMessageRecord>('messages', pid)
+    const map = new Map<string, { count: number; lastTime: number }>()
+    for (const m of all) {
+      const cur = map.get(m.sessionId) || { count: 0, lastTime: 0 }
+      cur.count += 1
+      cur.lastTime = Math.max(cur.lastTime, m.createdAt || 0)
+      map.set(m.sessionId, cur)
+    }
+    return Array.from(map.entries())
+      .map(([sessionId, v]) => ({ sessionId, ...v }))
+      .sort((a, b) => b.lastTime - a.lastTime)
+  },
+  save: (m: Partial<ChatMessageRecord> & { projectId: string; sessionId: string }) => save('messages', m),
+  remove: (id: string) => remove('messages', id),
+  /** 删除某项目下某会话的所有消息 */
+  async clearSession(pid: string, sessionId: string): Promise<void> {
+    const all = await list<ChatMessageRecord>('messages', pid)
+    const keep = all.filter(m => m.sessionId !== sessionId)
+    // 用 bulkSave 覆盖：先删全部再写回 keep 不可行（bulkSave 是 upsert），
+    // 改为逐条删除该会话消息
+    const toDel = all.filter(m => m.sessionId === sessionId)
+    for (const m of toDel) {
+      await remove('messages', m.id)
+    }
+  }
 }

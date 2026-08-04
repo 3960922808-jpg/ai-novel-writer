@@ -241,7 +241,7 @@
           <div v-else class="chat-list">
             <div
               v-for="(msg, i) in chatMessages"
-              :key="i"
+              :key="msg.id"
               class="chat-msg"
               :class="msg.role"
             >
@@ -261,8 +261,19 @@
                     <span class="option-text">{{ opt.text }}</span>
                   </button>
                 </div>
-                <div v-if="msg.selectedOption !== undefined" class="option-selected-hint">
-                  已选择 {{ String.fromCharCode(65 + msg.selectedOption) }}，继续生成中...
+                <div class="options-footer">
+                  <div v-if="msg.selectedOption !== undefined" class="option-selected-hint">
+                    已选择 {{ String.fromCharCode(65 + msg.selectedOption) }}（可点击其他选项重新选择）
+                  </div>
+                  <button
+                    class="re-ask-btn"
+                    title="对当前剧情节点重新要一组选项"
+                    :disabled="generating"
+                    @click="askAiToQuestion(msg)"
+                  >
+                    <el-icon><Refresh /></el-icon>
+                    <span>重新提问</span>
+                  </button>
                 </div>
               </div>
               <!-- AI 普通输出：圆角长方形卡片 -->
@@ -295,6 +306,13 @@
               </div>
               <!-- 用户消息 -->
               <div v-else class="chat-msg-content" v-html="renderMessage(msg.content)"></div>
+            </div>
+            <div v-if="webSearching" class="chat-msg assistant">
+              <div class="chat-msg-role">AI</div>
+              <div class="ai-output-card searching-card">
+                <el-icon class="rotating"><Loading /></el-icon>
+                <span>正在搜索互联网...</span>
+              </div>
             </div>
             <div v-if="generating" class="chat-msg assistant">
               <div class="chat-msg-role">AI</div>
@@ -428,6 +446,15 @@
         <!-- 底部操作行 -->
         <div class="input-bottom">
           <div class="input-bottom-left">
+            <button
+              class="web-search-btn"
+              :class="{ active: webSearchEnabled }"
+              :title="webSearchEnabled ? '联网搜索已开启（点击关闭）' : '开启联网搜索，AI 回答前先上网搜索'"
+              @click="toggleWebSearch"
+            >
+              <el-icon><Cloudy /></el-icon>
+              <span>{{ webSearchEnabled ? '联网搜索已开启' : '联网搜索' }}</span>
+            </button>
             <el-select
               v-model="selectedPromptId"
               placeholder="选择提示词 ▽"
@@ -466,7 +493,7 @@
     <!-- 顶部功能 - 时光机抽屉 -->
     <el-drawer v-model="historyVisible" title="历史记录" direction="rtl" size="380px">
       <div class="history-list">
-        <div v-for="h in chatHistoryList" :key="h.id" class="history-item">
+        <div v-for="h in chatHistoryList" :key="h.id" class="history-item" @click="openHistory(h)">
           <div class="history-title">{{ h.title }}</div>
           <div class="history-time text-faint text-xs">{{ formatTime(h.time) }}</div>
         </div>
@@ -551,7 +578,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowLeft, ArrowRight, ArrowDown, ArrowRight as Right, Back, Search, Plus,
   Document, Checked, Brush, Warning, Grid, Timer, Clock, Folder, Collection,
@@ -560,7 +587,8 @@ import {
   RefreshLeft, RefreshRight, Refresh, Switch,
   ChatLineRound, List, ChatDotRound, Link, Promotion,
   Star, DArrowLeft, DArrowRight, QuestionFilled, ChatLineSquare,
-  Location as LocationIcon, Reading, VideoPause, More
+  Location as LocationIcon, Reading, VideoPause, More,
+  Cloudy
 } from '@element-plus/icons-vue'
 import { useEditor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
@@ -571,6 +599,7 @@ import { useSettingsStore } from '@/stores/settings'
 import * as db from '@/services/db'
 import * as aiSvc from '@/services/ai'
 import { Skills as SkillsDB } from '@/services/db'
+import { useWebSearch } from '@/composables/useWebSearch'
 import type { Chapter, Prompt, Skill, CanvasNode } from '@/types'
 
 const route = useRoute()
@@ -578,6 +607,8 @@ const router = useRouter()
 const projectStore = useProjectStore()
 const settings = useSettingsStore()
 const project = computed(() => projectStore.current)
+// 联网搜索（按项目+editor 隔离开关状态）
+const { webSearchEnabled, searching: webSearching, lastResults: webSearchResults, toggleWebSearch, searchAndBuildContext } = useWebSearch(`editor:${project.value?.id || route.params.id || ''}`)
 
 const currentChapterId = ref(route.params.chapterId as string)
 const chapter = ref<Chapter | null>(null)
@@ -706,8 +737,14 @@ function toggleMainContent() {
   mainContentExpanded.value = !mainContentExpanded.value
 }
 
-function newConversation() {
+async function newConversation() {
+  // 清空当前章节的对话历史（内存 + 持久层）
+  const pid = project.value?.id
+  const sid = chapter.value?.id
   chatMessages.value = []
+  if (pid && sid) {
+    try { await db.Messages.clearSession(pid, sid) } catch (e: any) { console.error('[chat] 清空失败:', e?.message || e) }
+  }
   ElMessage.success('已新建对话')
 }
 
@@ -855,6 +892,7 @@ function buildContext(): string {
 
 // ===== AI 对话面板 =====
 interface EditorChatMessage {
+  id: string
   role: 'user' | 'assistant'
   content: string
   options?: Array<{ text: string; isCustom?: boolean }>
@@ -862,6 +900,78 @@ interface EditorChatMessage {
   isQuestion?: boolean
 }
 const chatMessages = ref<EditorChatMessage[]>([])
+
+// 唯一消息 id 生成器：避免用数组索引作 v-for key 导致 DOM 复用错乱（回答消失）
+let _msgIdSeq = 0
+function genMsgId(): string {
+  _msgIdSeq += 1
+  return `m${Date.now().toString(36)}_${_msgIdSeq}`
+}
+/** 追加一条对话消息，自动分配唯一 id 并持久化到 db */
+function pushMsg(msg: Omit<EditorChatMessage, 'id'>) {
+  const id = genMsgId()
+  chatMessages.value.push({ ...msg, id })
+  // 持久化（fire-and-forget，失败不影响对话流）
+  const pid = project.value?.id
+  const sid = chapter.value?.id
+  if (pid && sid) {
+    db.Messages.save({
+      id,
+      projectId: pid,
+      sessionId: sid,
+      role: msg.role,
+      content: msg.content,
+      options: msg.options,
+      selectedOption: msg.selectedOption,
+      isQuestion: msg.isQuestion,
+      createdAt: Date.now()
+    }).catch(e => console.error('[chat] 保存消息失败:', e?.message || e))
+  }
+}
+/** 加载当前章节的对话历史 */
+async function loadChatHistory() {
+  const pid = project.value?.id
+  const sid = chapter.value?.id
+  if (!pid || !sid) { chatMessages.value = []; return }
+  try {
+    const records = await db.Messages.listBySession(pid, sid)
+    chatMessages.value = records.map(r => ({
+      id: r.id,
+      role: r.role,
+      content: r.content,
+      options: r.options,
+      selectedOption: r.selectedOption,
+      isQuestion: r.isQuestion
+    }))
+  } catch (e: any) {
+    console.error('[chat] 加载历史失败:', e?.message || e)
+    chatMessages.value = []
+  }
+}
+/** 刷新历史记录抽屉列表（按会话/章节聚合） */
+async function loadChatHistoryList() {
+  const pid = project.value?.id
+  if (!pid) { chatHistoryList.value = []; return }
+  try {
+    const sessions = await db.Messages.listSessions(pid)
+    chatHistoryList.value = sessions.map(s => {
+      // sessionId 即 chapterId，映射成"第X章 · 标题"
+      const ch = projectStore.chapters.find(c => c.id === s.sessionId)
+      const title = ch ? `第${ch.order}章 · ${ch.title}` : (s.sessionId === 'settings' ? '设定对话' : '对话')
+      return { id: s.sessionId, title, time: s.lastTime }
+    })
+  } catch (e: any) {
+    console.error('[chat] 加载历史列表失败:', e?.message || e)
+    chatHistoryList.value = []
+  }
+}
+/** 点击历史项跳转到对应章节 */
+function openHistory(h: { id: string }) {
+  if (h.id && route.params.chapterId !== h.id) {
+    router.push({ name: 'editor', params: { id: route.params.id as string, chapterId: h.id } })
+  }
+  historyVisible.value = false
+}
 const userInput = ref('')
 const aiStreamingText = ref('')
 const generating = ref(false)
@@ -1256,7 +1366,7 @@ async function sendChat() {
   const displayMsg = pendingSkill.value
     ? `[技能：${pendingSkill.value.name}]${userMsg ? '\n' + userMsg : ''}${linkedLabels ? '\n' + linkedLabels : ''}`
     : (userMsg || linkedLabels)
-  chatMessages.value.push({ role: 'user', content: displayMsg })
+  pushMsg({ role: 'user', content: displayMsg })
   userInput.value = ''
   slashMenuVisible.value = false
 
@@ -1266,10 +1376,10 @@ async function sendChat() {
   //   always: 每次都给出 ABCD 选项让用户选
   //   never: 从不提问，直接续写
   const askModePrompt = askMode.value === 'always'
-    ? '\n\n【交互规则】在生成内容前，先以如下格式给出 3 个候选方向让用户选择：\n===QUESTION===\n问题：xxx\nA. 选项一\nB. 选项二\nC. 选项三\nD. 自定义\n===END===\n用户选择后再继续生成。'
+    ? '\n\n【交互规则】每次回复时，先用一两句话简述即将写的方向（这部分会作为正文保留），再按如下格式给出 3 个候选方向让用户选择：\n===QUESTION===\n问题：xxx\nA. 选项一\nB. 选项二\nC. 选项三\nD. 自定义\n===END===\n用户选择后再继续生成正文。不要在简述之外写正文，正文留到用户选择后生成。'
     : askMode.value === 'auto'
-      ? '\n\n【交互规则】只在以下情况向用户提问：1) 剧情走向有多种可能且无法判断用户偏好 2) 角色动机/设定存在矛盾 3) 用户提供的信息不足。提问时使用 ===QUESTION=== ... ===END=== 格式给出 ABCD 三个选项加 D 自定义。能够确定方向时直接续写，不要每段都问。'
-      : '\n\n【交互规则】直接续写，不要提问。'
+      ? '\n\n【交互规则】默认直接续写正文。只在以下"卡壳信号"出现时才提问：1) 剧情存在 2 个以上合理走向且无法从上下文判断用户偏好 2) 角色动机或设定存在矛盾，继续写会出错 3) 关键信息缺失（如时间/地点/人物关系不明）导致无法推进 4) 即将进入重大转折点（如高潮、反转、人物死亡）需要用户确认。提问时使用 ===QUESTION=== ... ===END=== 格式给出 ABCD 三个选项加 D 自定义，问题要具体、有决策价值，不要问"要不要继续"这种无意义问题。能确定方向时直接续写，不要每段都问。'
+      : '\n\n【交互规则】直接续写正文，不要提问，不要输出 ===QUESTION=== 块。'
   let sysContent = `你是一位资深小说家，擅长${project.value.genre}类型创作。请直接输出正文内容，不要写"以下是续写"等说明性文字，不要使用 markdown 代码块。文风自然流畅，避免AI味。${project.value.settings.styleSample ? '\n参考文风：' + project.value.settings.styleSample : ''}${askModePrompt}`
   // 链接故事画布的上下文：先缓存，稍后在 sysContent 被技能模板覆盖后再次追加，避免丢失
   const canvasCtx = buildCanvasContext()
@@ -1351,6 +1461,14 @@ async function sendChat() {
     sysContent += '\n\n' + canvasCtx
   }
 
+  // 联网搜索：开启时先上网搜索，把结果注入 system prompt
+  if (webSearchEnabled.value) {
+    const searchCtx = await searchAndBuildContext(userMsg, 6)
+    if (searchCtx) {
+      sysContent += '\n\n' + searchCtx
+    }
+  }
+
   generating.value = true
   aiStreamingText.value = ''
   stopFlag.value = false
@@ -1387,15 +1505,19 @@ async function sendChat() {
       // 解析 AI 输出是否包含 ===QUESTION===...===END=== 提问块
       const parsed = parseQuestionBlock(full)
       if (parsed) {
+        // 块外有正文（AI 先写一段再给选项）时，先把正文作为普通消息保存，避免丢失
+        if (parsed.leadingText) {
+          pushMsg({ role: 'assistant', content: parsed.leadingText })
+        }
         // AI 提问了，把消息改为带 options 的提问卡片
-        chatMessages.value.push({
+        pushMsg({
           role: 'assistant',
           content: parsed.question,
           options: parsed.options,
           isQuestion: true
         })
       } else {
-        chatMessages.value.push({ role: 'assistant', content: full })
+        pushMsg({ role: 'assistant', content: full })
       }
     }
   } catch (e: any) {
@@ -1421,6 +1543,13 @@ function stopGenerate() {
 
 // ===== AI 提问解析与回答 =====
 
+interface ParsedQuestion {
+  question: string
+  options: Array<{ text: string; isCustom?: boolean }>
+  /** QUESTION 块之前的正文（AI 可能先写一段再给选项），保留以免丢失 */
+  leadingText: string
+}
+
 /**
  * 解析 AI 输出中的提问块：
  *   ===QUESTION===
@@ -1430,18 +1559,24 @@ function stopGenerate() {
  *   C. 选项三
  *   D. 自定义
  *   ===END===
- * 返回 { question, options } 或 null
+ * 返回 { question, options, leadingText } 或 null
+ * leadingText 为块之外的正文，调用方应先把它作为普通消息保存。
  */
-function parseQuestionBlock(text: string): { question: string; options: Array<{ text: string; isCustom?: boolean }> } | null {
+function parseQuestionBlock(text: string): ParsedQuestion | null {
+  // 兼容任意数量的 = 号作为边界，且大小写不敏感
   const m = text.match(/=+\s*QUESTION\s*=+([\s\S]*?)=+\s*END\s*=+/i)
   if (!m) return null
   const block = m[1].trim()
+  // 块之前的正文
+  const matchStart = (m.index ?? 0)
+  const leadingText = text.slice(0, matchStart).trim()
   const lines = block.split('\n').map(l => l.trim()).filter(Boolean)
-  // 第一行通常是"问题：xxx"，但也可能直接是问题
   let question = ''
   const options: Array<{ text: string; isCustom?: boolean }> = []
   for (const line of lines) {
-    const qm = line.match(/^问[题题]?\s*[:：]\s*(.+)$/)
+    // 修复：原正则 /问[题题]?/ 重复了"题"，改为 /问[题]?/
+    // 同时支持 "Q:" "Q：" "问题:" "问:" 等多种格式
+    const qm = line.match(/^(?:问[题]?\s*|Q\s*)[:：]\s*(.+)$/i)
     if (qm && !question) {
       question = qm[1].trim()
       continue
@@ -1462,32 +1597,48 @@ function parseQuestionBlock(text: string): { question: string; options: Array<{ 
   if (!question && options.length === 0) return null
   // 如果没解析到选项，但整个块就一行，那把它当问题，无选项
   if (options.length === 0) return null
-  return { question, options }
+  return { question, options, leadingText }
 }
 
 /**
  * 用户点击选项后：把选择作为新一轮 user 消息发回 AI，让它继续生成
+ * 若该提问卡片已选择过（msg.selectedOption !== undefined），则视为"重新选择"：
+ *   只更新选项标记，不触发续写（避免每次重选都重新生成）。
  */
 async function answerQuestion(msg: EditorChatMessage, idx: number) {
-  if (msg.selectedOption !== undefined) return  // 已选择过
-  msg.selectedOption = idx
   const opt = msg.options?.[idx]
   if (!opt) return
-  const answer = opt.isCustom
-    ? `我选 D（自定义），请让我自己输入：`
-    : `我选 ${String.fromCharCode(65 + idx)}：${opt.text}\n请按这个方向继续创作。`
-  // 自定义选项弹输入框
+  const alreadyAnswered = msg.selectedOption !== undefined
+  msg.selectedOption = idx
+
+  // 自定义选项弹输入框（Electron 中 window.prompt 不工作，改用 ElMessageBox.prompt）
   if (opt.isCustom) {
-    const custom = window.prompt('请输入你的自定义答案：', '')
-    if (custom === null) {
+    try {
+      const { value } = await ElMessageBox.prompt('请输入你的自定义答案', '自定义走向', {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        inputType: 'textarea',
+        inputPlaceholder: '描述你想要的剧情走向…',
+        // 重新选择时预填上一次的自定义内容
+        inputValue: opt.text && opt.text.startsWith('自定义：') ? opt.text.slice(4) : ''
+      })
+      const custom = (value || '').trim()
+      if (!custom) {
+        if (!alreadyAnswered) msg.selectedOption = undefined
+        return
+      }
+      msg.options![idx].text = `自定义：${custom}`
+      if (alreadyAnswered) return // 仅更新标记，不续写
+      pushMsg({ role: 'user', content: `我选 D（自定义）：${custom}\n请按这个方向继续创作。` })
+    } catch {
       // 用户取消，撤销选择
-      msg.selectedOption = undefined
+      if (!alreadyAnswered) msg.selectedOption = undefined
       return
     }
-    msg.options![idx].text = `自定义：${custom}`
-    chatMessages.value.push({ role: 'user', content: `我选 D（自定义）：${custom}\n请按这个方向继续创作。` })
   } else {
-    chatMessages.value.push({ role: 'user', content: answer })
+    if (alreadyAnswered) return // 仅更新标记，不续写
+    const answer = `我选 ${String.fromCharCode(65 + idx)}：${opt.text}\n请按这个方向继续创作。`
+    pushMsg({ role: 'user', content: answer })
   }
   // 触发续写
   await continueAfterAnswer()
@@ -1504,10 +1655,10 @@ async function continueAfterAnswer() {
     return
   }
   const askModePrompt = askMode.value === 'always'
-    ? '\n\n【交互规则】继续按 ===QUESTION=== ... ===END=== 格式，每生成一段都给出 ABCD 选项让用户选择。'
+    ? '\n\n【交互规则】继续按 ===QUESTION=== ... ===END=== 格式，每次先用一两句话简述方向（作为正文保留），再给出 ABCD 选项让用户选择，正文留到用户选择后生成。'
     : askMode.value === 'auto'
-      ? '\n\n【交互规则】只在卡壳时提问，正常情况直接续写。'
-      : '\n\n【交互规则】直接续写，不要提问。'
+      ? '\n\n【交互规则】默认直接续写正文，只在卡壳信号出现时才提问（剧情多走向、设定矛盾、关键信息缺失、重大转折点）。'
+      : '\n\n【交互规则】直接续写正文，不要提问，不要输出 ===QUESTION=== 块。'
   const sysContent = `你是一位资深小说家，擅长${project.value.genre}类型创作。文风自然流畅，避免AI味。${project.value.settings.styleSample ? '\n参考文风：' + project.value.settings.styleSample : ''}${askModePrompt}`
   const ctx = buildContext()
   const recent = chatMessages.value
@@ -1550,14 +1701,17 @@ async function continueAfterAnswer() {
     if (full) {
       const parsed = parseQuestionBlock(full)
       if (parsed) {
-        chatMessages.value.push({
+        if (parsed.leadingText) {
+          pushMsg({ role: 'assistant', content: parsed.leadingText })
+        }
+        pushMsg({
           role: 'assistant',
           content: parsed.question,
           options: parsed.options,
           isQuestion: true
         })
       } else {
-        chatMessages.value.push({ role: 'assistant', content: full })
+        pushMsg({ role: 'assistant', content: full })
       }
     }
   } catch (e: any) {
@@ -1582,7 +1736,7 @@ async function askAiToQuestion(msg: EditorChatMessage) {
   const sysContent = `你是一位资深小说家。用户希望你在当前剧情节点给出 ABCD 四个走向选项让用户选择。严格按以下格式输出，不要其他文字：\n===QUESTION===\n问题：<基于当前剧情提出一个关键走向问题>\nA. <选项一>\nB. <选项二>\nC. <选项三>\nD. 自定义\n===END===`
   const userContent = `【当前上下文】\n${ctx}\n\n上一段 AI 输出：\n${msg.content?.slice(-500) || '（无）'}\n\n请给出 ABCD 选项。`
   // 先 push 一条提示
-  chatMessages.value.push({ role: 'user', content: '[让 AI 提问] 请基于当前剧情给出 ABCD 选项' })
+  pushMsg({ role: 'user', content: '[让 AI 提问] 请基于当前剧情给出 ABCD 选项' })
   generating.value = true
   aiStreamingText.value = ''
   stopFlag.value = false
@@ -1607,7 +1761,7 @@ async function askAiToQuestion(msg: EditorChatMessage) {
     if (full) {
       const parsed = parseQuestionBlock(full)
       if (parsed) {
-        chatMessages.value.push({
+        pushMsg({
           role: 'assistant',
           content: parsed.question,
           options: parsed.options,
@@ -1615,7 +1769,7 @@ async function askAiToQuestion(msg: EditorChatMessage) {
         })
       } else {
         // 没解析出来，把原文当普通消息
-        chatMessages.value.push({ role: 'assistant', content: full })
+        pushMsg({ role: 'assistant', content: full })
       }
     }
   } catch (e: any) {
@@ -1701,8 +1855,9 @@ function escapeHtml(s: string) {
 }
 
 // ===== 顶部功能 =====
-function runTopAction(action: string) {
+async function runTopAction(action: string) {
   if (action === 'time Machine') {
+    await loadChatHistoryList()
     historyVisible.value = true
     return
   }
@@ -1847,6 +2002,8 @@ onMounted(async () => {
     if (!aiModel.value && models.value.length > 0) {
       aiModel.value = project.value?.settings.model || settings.defaultModel() || models.value[0].model
     }
+    // 加载当前章节对话历史
+    await loadChatHistory()
   } catch (e: any) {
     ElMessage.error('初始化失败：' + e.message)
   }
@@ -1871,6 +2028,8 @@ watch(() => route.params.chapterId, async (id) => {
     // 切换章节前静默保存
     await save({ silent: true })
     await loadChapter(id as string)
+    // 切章节后加载该章节的对话历史
+    await loadChatHistory()
   }
 })
 </script>
@@ -2380,64 +2539,75 @@ html.dark .tb-sep { background: #334155; }
   background: #1d4ed8;
 }
 
-.chat-list { display: flex; flex-direction: column; gap: 12px; }
+.chat-list { display: flex; flex-direction: column; gap: 14px; }
 .chat-msg {
-  border-radius: 8px;
-  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   font-size: 13px;
   line-height: 1.6;
 }
 .chat-msg.user {
-  background: #e6f0ff;
-  color: #2d3748;
-  margin-left: 20px;
+  align-items: flex-end;
 }
 /* AI 消息容器本身不设背景，让内部 .ai-output-card 自己控制视觉 */
 .chat-msg.assistant {
-  background: transparent;
-  color: #2d3748;
-  margin-right: 0;
-  border: none;
-  padding: 4px 0;
+  align-items: flex-start;
 }
 .chat-msg-role {
   font-size: 11px;
-  color: #718096;
-  margin-bottom: 4px;
+  color: var(--text-3);
+  margin-bottom: 2px;
   font-weight: 600;
+  padding: 0 2px;
 }
 .chat-msg-content {
   white-space: pre-wrap;
   word-break: break-word;
+  line-height: 1.7;
 }
-.chat-msg-content.streaming { color: #4a5568; }
+/* 用户消息气泡：主色背景，右对齐，最大宽度限制 */
+.chat-msg.user .chat-msg-content {
+  max-width: 85%;
+  padding: 9px 13px;
+  border-radius: 14px 14px 4px 14px;
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 1px 4px rgba(91, 155, 213, 0.25);
+}
+.chat-msg-content.streaming { color: var(--text-2); }
 .chat-msg-actions {
   display: flex;
   gap: 4px;
   margin-top: 6px;
   padding-top: 6px;
-  border-top: 1px dashed #e2e8f0;
+  border-top: 1px dashed var(--border);
 }
 
 /* ===== AI 输出圆角长方形卡片 ===== */
 .ai-output-card {
-  background: linear-gradient(180deg, #f8faff 0%, #f1f5fb 100%);
-  border: 1px solid #dbe5f3;
+  max-width: 92%;
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: 14px;
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.05);
-  transition: box-shadow 0.18s ease, border-color 0.18s ease;
+  box-shadow: var(--shadow);
+  transition: box-shadow 0.18s ease, border-color 0.18s ease, background-color 0.3s ease;
 }
 .ai-output-card:hover {
-  border-color: #bcd0f5;
-  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.1);
+  border-color: var(--primary);
+  box-shadow: var(--shadow-hover);
 }
 .ai-output-card.streaming-card {
-  background: #fafbff;
-  border-color: #c7d6f5;
+  background: var(--panel-2);
+  border-color: var(--primary);
+}
+html.has-wallpaper .ai-output-card {
+  backdrop-filter: blur(8px) saturate(1.2);
+  -webkit-backdrop-filter: blur(8px) saturate(1.2);
 }
 .ai-output-top {
   display: flex;
@@ -2668,6 +2838,44 @@ html.dark .send-demand-btn:disabled {
 .input-bottom-left {
   display: flex;
   gap: 6px;
+  align-items: center;
+}
+.web-search-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  border: 1px solid var(--border, #dcdfe6);
+  border-radius: 4px;
+  background: var(--panel, #fff);
+  color: var(--text-2, #606266);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.web-search-btn:hover {
+  border-color: var(--primary, #409eff);
+  color: var(--primary, #409eff);
+}
+.web-search-btn.active {
+  background: var(--primary, #409eff);
+  border-color: var(--primary, #409eff);
+  color: #fff;
+}
+.searching-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--primary, #409eff);
+  font-size: 13px;
+  padding: 12px 16px;
+}
+.rotating {
+  animation: rotate 1s linear infinite;
+}
+@keyframes rotate {
+  to { transform: rotate(360deg); }
 }
 .input-bottom-right {
   display: flex;
@@ -2879,6 +3087,34 @@ html.dark .send-demand-btn:disabled {
   padding: 4px 0 0;
   text-align: right;
 }
+.options-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+}
+.re-ask-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 1px solid var(--border, #ebeef5);
+  color: var(--text-2, #606266);
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.re-ask-btn:hover:not(:disabled) {
+  border-color: var(--primary, #5b9bd5);
+  color: var(--primary, #5b9bd5);
+}
+.re-ask-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 /* ===== 深色主题覆盖（Editor.vue 内所有硬编码浅色样式） ===== */
 html.dark .editor-root { background: #0f172a; color: #f1f5f9; }
@@ -2931,16 +3167,13 @@ html.dark .save-status.saved { color: #34d399; }
 
 html.dark .chat-display { background: #0f172a; }
 html.dark .chat-empty { color: #64748b; }
-html.dark .chat-msg.user .chat-msg-content { background: #1e40af; color: #fff; }
-html.dark .chat-msg.assistant .chat-msg-content { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; }
-
-html.dark .ai-output-card {
-  background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
-  border-color: #334155;
-  color: #e2e8f0;
+html.dark .chat-msg.user .chat-msg-content {
+  background: var(--primary-dark);
+  color: #fff;
 }
-html.dark .ai-output-card.streaming-card { background: #1a2540; border-color: #3b4969; }
-html.dark .ai-output-content.streaming { color: #93c5fd; }
+
+/* AI 卡片深色模式已由 CSS 变量自动处理，无需额外覆盖 */
+html.dark .ai-output-content.streaming { color: var(--primary); }
 html.dark .ai-act-btn { color: #cbd5e0; }
 html.dark .ai-act-btn:hover { background: #334155; color: #93c5fd; }
 
