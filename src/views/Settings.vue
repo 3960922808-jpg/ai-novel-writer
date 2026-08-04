@@ -94,9 +94,15 @@
                       <div class="quick-desc text-faint text-xs">MiniMax-M3 / M2.7 系列</div>
                     </div>
                   </el-dropdown-item>
-                  <el-dropdown-item command="custom" divided>
+                  <el-dropdown-item command="relay" divided>
                     <div class="quick-item">
-                      <div class="quick-name">自定义 Provider</div>
+                      <div class="quick-name">中转站 / 自定义接口</div>
+                      <div class="quick-desc text-faint text-xs">任意 BaseURL + API Key（含中转站、自建网关）</div>
+                    </div>
+                  </el-dropdown-item>
+                  <el-dropdown-item command="custom">
+                    <div class="quick-item">
+                      <div class="quick-name">空白 Provider</div>
                       <div class="quick-desc text-faint text-xs">手动填写所有信息</div>
                     </div>
                   </el-dropdown-item>
@@ -107,6 +113,7 @@
         </div>
         <div class="text-faint text-xs" style="margin-bottom: 12px">
           模型只能通过下方 API 配置管理。第一个配置了 API Key 的 Provider 将作为默认使用。
+          支持任意 OpenAI 兼容接口，可直接填入<span style="color: var(--text-2)">中转站</span>地址与对应 Key。
         </div>
 
         <div v-for="(p, idx) in form.apiKeys" :key="idx" class="provider-card">
@@ -126,11 +133,20 @@
 
           <div v-if="testResults[idx]" class="test-result" :class="testResults[idx].ok ? 'ok' : 'fail'">
             <el-icon><CircleCheck v-if="testResults[idx].ok" /><CircleClose v-else /></el-icon>
-            <span>{{ testResults[idx].msg }}</span>
+            <span class="test-result-msg">{{ testResults[idx].msg }}</span>
+            <span
+              v-if="testResults[idx].latency !== undefined"
+              class="test-latency-badge"
+              :class="latencyLevel(testResults[idx].latency)"
+              :title="'接口延迟 ' + testResults[idx].latency + ' ms'"
+            >{{ testResults[idx].latency }} ms</span>
           </div>
 
           <el-form-item label="BaseURL">
-            <el-input v-model="p.baseUrl" placeholder="API 地址，如 https://api.openai.com/v1" />
+            <el-input v-model="p.baseUrl" placeholder="API 地址，如 https://api.openai.com/v1；中转站填其分配的地址，结尾保留 /v1" />
+            <div class="text-faint text-xs" style="margin-top: 4px">
+              支持官方接口与任意 OpenAI 兼容中转站 / 自建网关，结尾需包含版本号（如 /v1）
+            </div>
           </el-form-item>
 
           <el-form-item label="API Key">
@@ -350,7 +366,14 @@ const modelInputRefs = ref<any[] | null>(null)
 
 // 测试连通性状态
 const testingIdx = ref<number | null>(null)
-const testResults = ref<Record<number, { ok: boolean; msg: string }>>({})
+const testResults = ref<Record<number, { ok: boolean; msg: string; latency?: number }>>({})
+
+// 根据延迟数值划分等级，用于徽章配色：<=300ms 优秀，<=800ms 良好，>800ms 较慢
+function latencyLevel(ms: number): string {
+  if (ms <= 300) return 'fast'
+  if (ms <= 800) return 'ok'
+  return 'slow'
+}
 
 // 大模型快速设置预设
 interface ProviderPreset {
@@ -407,6 +430,21 @@ function quickAddProvider(cmd: string) {
     addProvider()
     return
   }
+  // 中转站 / 自定义接口：填入占位 baseUrl 与提示，等用户改写
+  if (cmd === 'relay') {
+    if (form.apiKeys.some(p => p.provider === '中转站')) {
+      ElMessage.warning('已存在「中转站」配置，请直接在下方填写 BaseURL 与 API Key')
+      return
+    }
+    form.apiKeys.push({
+      provider: '中转站',
+      baseUrl: '',
+      apiKey: '',
+      models: []
+    })
+    ElMessage.success('已添加中转站配置，请填入中转站分配的 BaseURL 与 API Key（兼容 OpenAI 接口即可）')
+    return
+  }
   const preset = PROVIDER_PRESETS.find(p => p.key === cmd)
   if (!preset) {
     addProvider()
@@ -446,7 +484,7 @@ function removeProvider(idx: number) {
   form.apiKeys.splice(idx, 1)
 }
 
-// 测试 Provider 连通性
+// 测试 Provider 连通性（含延迟测量，单位 ms）
 async function testConnection(idx: number) {
   const p = form.apiKeys[idx]
   if (!p.baseUrl) {
@@ -454,15 +492,18 @@ async function testConnection(idx: number) {
     return
   }
   testingIdx.value = idx
+  const t0 = performance.now()
   try {
     const url = p.baseUrl.replace(/\/+$/, '') + '/models'
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (p.apiKey) headers['Authorization'] = `Bearer ${p.apiKey}`
     const res = await fetch(url, { method: 'GET', headers })
+    const latency = Math.round(performance.now() - t0)
     if (!res.ok) {
       const text = await res.text().catch(() => '')
       testResults.value[idx] = {
         ok: false,
+        latency,
         msg: `HTTP ${res.status} ${res.statusText}${text ? ' · ' + text.slice(0, 80) : ''}`
       }
       return
@@ -476,14 +517,17 @@ async function testConnection(idx: number) {
       if (newIds.length > 0) p.models.push(...newIds)
       testResults.value[idx] = {
         ok: true,
+        latency,
         msg: `连通成功 · 共 ${ids.length} 个模型${newIds.length > 0 ? ` · 已自动添加 ${newIds.length} 个新模型` : ''}`
       }
     } else {
-      testResults.value[idx] = { ok: true, msg: '连通成功（响应未返回模型列表，但 API 可用）' }
+      testResults.value[idx] = { ok: true, latency, msg: '连通成功（响应未返回模型列表，但 API 可用）' }
     }
   } catch (e: any) {
+    const latency = Math.round(performance.now() - t0)
     testResults.value[idx] = {
       ok: false,
+      latency,
       msg: '连接失败：' + (e?.message || '网络错误')
     }
   } finally {
@@ -710,6 +754,35 @@ async function save() {
   background: rgba(239, 68, 68, 0.08);
   color: #ef4444;
   border: 1px solid rgba(239, 68, 68, 0.3);
+}
+.test-result-msg {
+  flex: 1;
+  min-width: 0;
+}
+.test-latency-badge {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.test-latency-badge.fast {
+  background: rgba(16, 185, 129, 0.18);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+.test-latency-badge.ok {
+  background: rgba(245, 158, 11, 0.18);
+  color: #d97706;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+.test-latency-badge.slow {
+  background: rgba(239, 68, 68, 0.15);
+  color: #dc2626;
+  border: 1px solid rgba(239, 68, 68, 0.4);
 }
 .provider-name {
   font-weight: 600;

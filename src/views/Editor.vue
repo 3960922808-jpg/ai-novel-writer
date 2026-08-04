@@ -241,7 +241,7 @@
           <div v-else class="chat-list">
             <div
               v-for="(msg, i) in chatMessages"
-              :key="i"
+              :key="msg.id"
               class="chat-msg"
               :class="msg.role"
             >
@@ -855,6 +855,7 @@ function buildContext(): string {
 
 // ===== AI 对话面板 =====
 interface EditorChatMessage {
+  id: string
   role: 'user' | 'assistant'
   content: string
   options?: Array<{ text: string; isCustom?: boolean }>
@@ -862,6 +863,17 @@ interface EditorChatMessage {
   isQuestion?: boolean
 }
 const chatMessages = ref<EditorChatMessage[]>([])
+
+// 唯一消息 id 生成器：避免用数组索引作 v-for key 导致 DOM 复用错乱（回答消失）
+let _msgIdSeq = 0
+function genMsgId(): string {
+  _msgIdSeq += 1
+  return `m${Date.now().toString(36)}_${_msgIdSeq}`
+}
+/** 追加一条对话消息，自动分配唯一 id */
+function pushMsg(msg: Omit<EditorChatMessage, 'id'>) {
+  chatMessages.value.push({ ...msg, id: genMsgId() })
+}
 const userInput = ref('')
 const aiStreamingText = ref('')
 const generating = ref(false)
@@ -1256,7 +1268,7 @@ async function sendChat() {
   const displayMsg = pendingSkill.value
     ? `[技能：${pendingSkill.value.name}]${userMsg ? '\n' + userMsg : ''}${linkedLabels ? '\n' + linkedLabels : ''}`
     : (userMsg || linkedLabels)
-  chatMessages.value.push({ role: 'user', content: displayMsg })
+  pushMsg({ role: 'user', content: displayMsg })
   userInput.value = ''
   slashMenuVisible.value = false
 
@@ -1388,14 +1400,14 @@ async function sendChat() {
       const parsed = parseQuestionBlock(full)
       if (parsed) {
         // AI 提问了，把消息改为带 options 的提问卡片
-        chatMessages.value.push({
+        pushMsg({
           role: 'assistant',
           content: parsed.question,
           options: parsed.options,
           isQuestion: true
         })
       } else {
-        chatMessages.value.push({ role: 'assistant', content: full })
+        pushMsg({ role: 'assistant', content: full })
       }
     }
   } catch (e: any) {
@@ -1485,9 +1497,9 @@ async function answerQuestion(msg: EditorChatMessage, idx: number) {
       return
     }
     msg.options![idx].text = `自定义：${custom}`
-    chatMessages.value.push({ role: 'user', content: `我选 D（自定义）：${custom}\n请按这个方向继续创作。` })
+    pushMsg({ role: 'user', content: `我选 D（自定义）：${custom}\n请按这个方向继续创作。` })
   } else {
-    chatMessages.value.push({ role: 'user', content: answer })
+    pushMsg({ role: 'user', content: answer })
   }
   // 触发续写
   await continueAfterAnswer()
@@ -1550,14 +1562,14 @@ async function continueAfterAnswer() {
     if (full) {
       const parsed = parseQuestionBlock(full)
       if (parsed) {
-        chatMessages.value.push({
+        pushMsg({
           role: 'assistant',
           content: parsed.question,
           options: parsed.options,
           isQuestion: true
         })
       } else {
-        chatMessages.value.push({ role: 'assistant', content: full })
+        pushMsg({ role: 'assistant', content: full })
       }
     }
   } catch (e: any) {
@@ -1582,7 +1594,7 @@ async function askAiToQuestion(msg: EditorChatMessage) {
   const sysContent = `你是一位资深小说家。用户希望你在当前剧情节点给出 ABCD 四个走向选项让用户选择。严格按以下格式输出，不要其他文字：\n===QUESTION===\n问题：<基于当前剧情提出一个关键走向问题>\nA. <选项一>\nB. <选项二>\nC. <选项三>\nD. 自定义\n===END===`
   const userContent = `【当前上下文】\n${ctx}\n\n上一段 AI 输出：\n${msg.content?.slice(-500) || '（无）'}\n\n请给出 ABCD 选项。`
   // 先 push 一条提示
-  chatMessages.value.push({ role: 'user', content: '[让 AI 提问] 请基于当前剧情给出 ABCD 选项' })
+  pushMsg({ role: 'user', content: '[让 AI 提问] 请基于当前剧情给出 ABCD 选项' })
   generating.value = true
   aiStreamingText.value = ''
   stopFlag.value = false
@@ -1607,7 +1619,7 @@ async function askAiToQuestion(msg: EditorChatMessage) {
     if (full) {
       const parsed = parseQuestionBlock(full)
       if (parsed) {
-        chatMessages.value.push({
+        pushMsg({
           role: 'assistant',
           content: parsed.question,
           options: parsed.options,
@@ -1615,7 +1627,7 @@ async function askAiToQuestion(msg: EditorChatMessage) {
         })
       } else {
         // 没解析出来，把原文当普通消息
-        chatMessages.value.push({ role: 'assistant', content: full })
+        pushMsg({ role: 'assistant', content: full })
       }
     }
   } catch (e: any) {
