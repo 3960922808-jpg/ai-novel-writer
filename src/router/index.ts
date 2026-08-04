@@ -32,6 +32,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'lore', name: 'lore', component: () => import('@/views/Lore.vue'), meta: { title: '世界观设定' } },
       { path: 'timeline', name: 'timeline', component: () => import('@/views/Timeline.vue'), meta: { title: '时间线' } },
       { path: 'canvas', name: 'canvas', component: () => import('@/views/StoryCanvas.vue'), meta: { title: '故事画布' } },
+      { path: 'chat', name: 'chat', component: () => import('@/views/ChatSettings.vue'), meta: { title: '设定对话' } },
       { path: 'prompts', name: 'prompts', component: () => import('@/views/PromptLibrary.vue'), meta: { title: '提示词库' } },
       { path: 'goals', name: 'goals', component: () => import('@/views/WritingGoals.vue'), meta: { title: '写作目标' } },
       { path: 'critics', name: 'critics', component: () => import('@/views/AICritics.vue'), meta: { title: 'AI 评审' } },

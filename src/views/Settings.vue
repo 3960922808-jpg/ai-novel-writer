@@ -112,14 +112,39 @@
           </div>
         </div>
         <div class="text-faint text-xs" style="margin-bottom: 12px">
-          模型只能通过下方 API 配置管理。第一个配置了 API Key 的 Provider 将作为默认使用。
+          模型只能通过下方 API 配置管理。<span style="color: var(--text-2)">支持同时保留多个 Provider 与模型配置，互不影响</span> —— 第一个「已就绪」（填了 API Key 且有模型）的将作为默认使用。
           支持任意 OpenAI 兼容接口，可直接填入<span style="color: var(--text-2)">中转站</span>地址与对应 Key。
+        </div>
+
+        <!-- 可用模型总览：直观展示多个模型共存 -->
+        <div v-if="readyProviders.length > 0" class="ready-overview">
+          <div class="ready-overview-head">
+            <el-icon class="ready-icon"><CircleCheck /></el-icon>
+            <span class="ready-overview-title">当前可用模型总览</span>
+            <el-tag size="small" type="success" effect="dark">
+              {{ readyProviders.length }} 个 Provider · {{ readyModelCount }} 个模型
+            </el-tag>
+          </div>
+          <div class="ready-models-list">
+            <span v-for="m in allReadyModels" :key="m" class="ready-model-chip">{{ m }}</span>
+          </div>
+          <div class="text-faint text-xs ready-overview-tip">
+            这些模型可在写作、设定对话等功能中直接选用，新增配置不会清除已有模型。
+          </div>
+        </div>
+        <div v-else class="ready-overview empty">
+          <el-icon class="ready-icon"><InfoFilled /></el-icon>
+          <span class="text-faint text-xs">还没有「已就绪」的模型配置，请添加 Provider 并填写 API Key 与模型</span>
         </div>
 
         <div v-for="(p, idx) in form.apiKeys" :key="idx" class="provider-card">
           <div class="provider-header">
             <el-input v-model="p.provider" size="small" style="width: 180px" placeholder="Provider 名称" />
-            <el-tag size="small" effect="plain">{{ p.models.length }} 个模型</el-tag>
+            <el-tag
+              size="small"
+              :type="providerStatus(p).ok ? 'success' : 'info'"
+              effect="light"
+            >{{ providerStatus(p).label }} · {{ p.models.length }} 个模型</el-tag>
             <div class="provider-actions">
               <el-button
                 size="small"
@@ -272,12 +297,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, nextTick, onMounted } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   ArrowLeft, ArrowDown, Check, Plus, Sunny, Moon, Refresh, Monitor, Link,
-  Connection, Delete, CircleCheck, CircleClose
+  Connection, Delete, CircleCheck, CircleClose, InfoFilled
 } from '@element-plus/icons-vue'
 import { useSettingsStore } from '@/stores/settings'
 import type { AppSettings } from '@/types'
@@ -373,6 +398,25 @@ function latencyLevel(ms: number): string {
   if (ms <= 300) return 'fast'
   if (ms <= 800) return 'ok'
   return 'slow'
+}
+
+// 多模型共存：已就绪的 Provider（填了 API Key 且至少 1 个模型）
+type ApiKeyCfg = AppSettings['apiKeys'][number]
+const readyProviders = computed<ApiKeyCfg[]>(() =>
+  form.apiKeys.filter(p => p.apiKey && p.apiKey.trim() && p.models.length > 0)
+)
+const readyModelCount = computed(() => readyProviders.value.reduce((n, p) => n + p.models.length, 0))
+const allReadyModels = computed(() => {
+  const r: string[] = []
+  for (const p of readyProviders.value) r.push(...p.models)
+  return r
+})
+// 单个 Provider 的就绪状态徽章
+function providerStatus(p: ApiKeyCfg): { ok: boolean; label: string } {
+  if (p.apiKey && p.apiKey.trim() && p.models.length > 0) return { ok: true, label: '已就绪' }
+  if (!p.apiKey && p.models.length === 0) return { ok: false, label: '未配置' }
+  if (!p.apiKey) return { ok: false, label: '缺 API Key' }
+  return { ok: false, label: '缺模型' }
 }
 
 // 大模型快速设置预设
@@ -691,6 +735,60 @@ async function save() {
 }
 .provider-card:last-child {
   margin-bottom: 0;
+}
+/* 可用模型总览 */
+.ready-overview {
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border-radius: var(--radius);
+  background: rgba(16, 185, 129, 0.06);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+.ready-overview.empty {
+  background: var(--panel-2);
+  border: 1px dashed var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ready-overview.empty .ready-icon {
+  color: var(--text-3);
+}
+.ready-overview-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.ready-icon {
+  color: #10b981;
+  font-size: 16px;
+}
+.ready-overview-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.ready-models-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.ready-model-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: 12px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.ready-overview-tip {
+  margin-top: 2px;
 }
 .provider-header {
   display: flex;
