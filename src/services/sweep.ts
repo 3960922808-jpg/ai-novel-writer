@@ -19,10 +19,14 @@ export interface RankSource {
   label: string
   /** 站点名 */
   site: 'fanqie' | 'qidian' | 'custom'
-  /** 榜单 URL */
+  /** 榜单 URL（番茄新版用 API 地址，含 rank_type 与 gender 参数） */
   url: string
   /** 抓取时使用的 Referer */
   referer?: string
+  /** 番茄 API 模式：rank_type 参数 */
+  rankType?: string
+  /** 番茄 API 模式：gender 参数（male/female） */
+  gender?: 'male' | 'female'
 }
 
 export interface RankBook {
@@ -98,42 +102,68 @@ export interface SweepRecord {
 }
 
 // ====== 内置榜单 ======
+// 番茄 2024+ 改版：榜单页改为客户端 JS 动态请求 API 加载，SSR HTML 不再含作品列表。
+// 直接抓 HTML 会解析为空，必须改调官方榜单 API：
+//   /api/rank/list?rank_type=xxx&gender=male|female&page_count=0&page_index=0
+// rank_type: most_read(畅销) / finish(完结) / rise(飙升) / new(新书)
+// gender: male(男生) / female(女生)
+const FANQIE_RANK_API = 'https://fanqienovel.com/api/rank/list'
+const FANQIE_REFERER = 'https://fanqienovel.com/'
 
 export const BUILTIN_RANKS: RankSource[] = [
   {
     id: 'fanqie-boys-hot',
     label: '番茄 · 男生畅销榜',
     site: 'fanqie',
-    url: 'https://fanqienovel.com/rank/most_read_boys',
-    referer: 'https://fanqienovel.com/'
+    url: FANQIE_RANK_API,
+    referer: FANQIE_REFERER,
+    rankType: 'most_read',
+    gender: 'male'
   },
   {
     id: 'fanqie-girls-hot',
     label: '番茄 · 女生畅销榜',
     site: 'fanqie',
-    url: 'https://fanqienovel.com/rank/most_read_girls',
-    referer: 'https://fanqienovel.com/'
+    url: FANQIE_RANK_API,
+    referer: FANQIE_REFERER,
+    rankType: 'most_read',
+    gender: 'female'
   },
   {
-    id: 'fanqie-finish',
-    label: '番茄 · 完结榜',
+    id: 'fanqie-boys-finish',
+    label: '番茄 · 男生完结榜',
     site: 'fanqie',
-    url: 'https://fanqienovel.com/rank/finish',
-    referer: 'https://fanqienovel.com/'
+    url: FANQIE_RANK_API,
+    referer: FANQIE_REFERER,
+    rankType: 'finish',
+    gender: 'male'
   },
   {
-    id: 'fanqie-new',
-    label: '番茄 · 新书榜',
+    id: 'fanqie-girls-finish',
+    label: '番茄 · 女生完结榜',
     site: 'fanqie',
-    url: 'https://fanqienovel.com/rank/new',
-    referer: 'https://fanqienovel.com/'
+    url: FANQIE_RANK_API,
+    referer: FANQIE_REFERER,
+    rankType: 'finish',
+    gender: 'female'
   },
   {
     id: 'fanqie-rise',
     label: '番茄 · 飙升榜',
     site: 'fanqie',
-    url: 'https://fanqienovel.com/rank/rise',
-    referer: 'https://fanqienovel.com/'
+    url: FANQIE_RANK_API,
+    referer: FANQIE_REFERER,
+    rankType: 'rise',
+    gender: 'male'
+  },
+  {
+    id: 'fanqie-new',
+    label: '番茄 · 新书榜',
+    site: 'fanqie',
+    url: FANQIE_RANK_API,
+    referer: FANQIE_REFERER,
+    rankType: 'new',
+    gender: 'male'
   }
 ]
 
@@ -172,6 +202,43 @@ function extractNextData(html: string): any | null {
     }
   } catch {
     // ignore
+  }
+  return null
+}
+
+/**
+ * 从 HTML 中提取 window.__INITIAL_STATE__ = {...} 的 JSON 对象。
+ * 番茄 2024+ 改版后用此结构（不再用 __NEXT_DATA__）。
+ * 用花括号配对扫描而非正则，避免 JSON 过长时非贪婪匹配截断。
+ */
+function extractInitialState(html: string): any | null {
+  const marker = '__INITIAL_STATE__'
+  const start = html.indexOf(marker)
+  if (start < 0) return null
+  // 找到赋值后的第一个 {
+  let i = html.indexOf('{', start)
+  if (i < 0) return null
+  let depth = 0
+  let inStr = false
+  let esc = false
+  for (; i < html.length; i++) {
+    const ch = html[i]
+    if (esc) { esc = false; continue }
+    if (ch === '\\') { esc = true; continue }
+    if (ch === '"') { inStr = !inStr; continue }
+    if (inStr) continue
+    if (ch === '{') depth++
+    else if (ch === '}') {
+      depth--
+      if (depth === 0) {
+        const jsonStr = html.slice(html.indexOf('{', start), i + 1)
+        try {
+          return JSON.parse(jsonStr)
+        } catch {
+          return null
+        }
+      }
+    }
   }
   return null
 }
@@ -217,18 +284,63 @@ function deepCollect(obj: any, predicate: (v: any) => boolean, limit = 100): any
 // ====== 番茄榜单解析 ======
 
 /**
- * 解析番茄榜单页 HTML，提取作品列表
- * 番茄榜单页是 SSR 的，作品链接形如 /page/{bookId}
+ * 解析番茄榜单。
+ * 新版番茄（2024+）榜单页 SSR HTML 不含作品列表，需调
+ *   /api/rank/list?rank_type=xxx&gender=male|female&page_count=0&page_index=0
+ * 返回 {data:{list:[{bookId,bookName,thumbUri,abstract,author}, ...], total}}
+ * 同时保留旧版 HTML 解析作为 fallback（兼容回退 / 自定义 URL）。
  */
-export function parseFanqieRank(html: string): RankBook[] {
-  // 优先从 __NEXT_DATA__ 提取
-  const next = extractNextData(html)
+export function parseFanqieRank(htmlOrJson: string): RankBook[] {
+  // 1. 优先尝试 JSON（新版 API 模式）
+  const fromJson = tryParseFanqieRankJson(htmlOrJson)
+  if (fromJson.length > 0) return fromJson
+  // 2. fallback：旧版 __NEXT_DATA__
+  const next = extractNextData(htmlOrJson)
   if (next) {
     const books = tryParseFanqieRankFromNext(next)
     if (books.length > 0) return books
   }
-  // fallback：正则匹配 /page/{bookId} 链接
-  return parseFanqieRankByRegex(html)
+  // 3. fallback：正则匹配 /page/{bookId} 链接（最老的 SSR 版本）
+  return parseFanqieRankByRegex(htmlOrJson)
+}
+
+/** 把字数（数字或字符串）格式化为"xx.x万字"，便于阅读 */
+function formatWordCount(v: any): string {
+  const n = Number(v)
+  if (!n || isNaN(n)) return String(v || '')
+  if (n >= 10000) return (n / 10000).toFixed(1).replace(/\.0$/, '') + '万字'
+  return n + '字'
+}
+
+/** 解析番茄榜单 API 返回的 JSON */
+function tryParseFanqieRankJson(raw: string): RankBook[] {
+  let obj: any
+  try {
+    obj = typeof raw === 'string' ? JSON.parse(raw) : raw
+  } catch {
+    return []
+  }
+  if (!obj || typeof obj !== 'object') return []
+  const list = obj?.data?.list || obj?.data?.bookList || obj?.list || []
+  if (!Array.isArray(list) || list.length === 0) return []
+  const out: RankBook[] = []
+  for (const b of list) {
+    if (!b || typeof b !== 'object') continue
+    const bookId = String(b.bookId || b.book_id || '')
+    if (!bookId) continue
+    out.push({
+      bookId,
+      title: String(b.bookName || b.book_name || b.title || ''),
+      author: String(b.author || b.authorName || ''),
+      summary: String(b.abstract || b.summary || b.desc || ''),
+      wordCount: formatWordCount(b.wordNumber || b.word_count || b.words),
+      category: String(b.category || b.categoryName || b.genre || ''),
+      cover: String(b.thumbUri || b.thumb || b.cover || ''),
+      detailUrl: `https://fanqienovel.com/page/${bookId}`,
+      site: 'fanqie'
+    })
+  }
+  return out
 }
 
 function tryParseFanqieRankFromNext(next: any): RankBook[] {
@@ -294,13 +406,101 @@ function parseFanqieRankByRegex(html: string): RankBook[] {
 
 // ====== 番茄作品详情解析 ======
 
+/**
+ * 解析番茄作品详情页 HTML，提取书名/作者/简介/字数/分类/标签。
+ * 番茄 2024+ 改版后：
+ *   - 详情页用 window.__INITIAL_STATE__.page 注入数据（含 bookName/author/abstract/wordNumber/category 等）
+ *   - chapterList 为空（章节需另外调目录 API，见 fetchFanqieChapters）
+ * 保留旧版 __NEXT_DATA__ 与正则 fallback 兼容回退。
+ */
 export function parseFanqieDetail(html: string, bookId: string): BookDetail | null {
+  // 1. 优先 __INITIAL_STATE__（新版）
+  const state = extractInitialState(html)
+  if (state) {
+    const detail = tryParseFanqieDetailFromState(state, bookId)
+    if (detail) return detail
+  }
+  // 2. fallback __NEXT_DATA__（旧版）
   const next = extractNextData(html)
   if (next) {
     const detail = tryParseFanqieDetailFromNext(next, bookId)
     if (detail) return detail
   }
+  // 3. fallback 正则
   return parseFanqieDetailByRegex(html, bookId)
+}
+
+/** 从 __INITIAL_STATE__.page 提取详情（新版番茄） */
+function tryParseFanqieDetailFromState(state: any, bookId: string): BookDetail | null {
+  const page = state?.page
+  if (!page || typeof page !== 'object') return null
+  const title = String(page.bookName || page.book_name || page.title || '')
+  if (!title) return null
+  // categoryV2 在部分版本是结构化数组，部分版本是字符串，统一兼容
+  const tags: string[] = []
+  if (Array.isArray(page.categoryV2)) {
+    for (const t of page.categoryV2) {
+      const name = t?.Name || t?.name
+      if (name) tags.push(String(name))
+    }
+  }
+  // category 字段形如 "男生/都市/都市重生"，切分后作为标签补充（去重）
+  const categoryStr = String(page.category || '')
+  if (categoryStr) {
+    for (const seg of categoryStr.split('/')) {
+      const s = seg.trim()
+      if (s && !tags.includes(s)) tags.push(s)
+    }
+  }
+  return {
+    bookId,
+    title,
+    author: String(page.author || page.authorName || ''),
+    summary: String(page.abstract || page.summary || page.desc || ''),
+    wordCount: formatWordCount(page.wordNumber || page.word_count || page.words),
+    category: categoryStr,
+    cover: String(page.thumbUri || page.thumb || page.cover || ''),
+    detailUrl: `https://fanqienovel.com/page/${bookId}`,
+    site: 'fanqie',
+    tags,
+    chapters: [], // 新版章节需调目录 API，见 fetchFanqieChapters
+    status: String(page.bookStatus || page.status || ''),
+    score: String(page.score || page.rating || '')
+  }
+}
+
+/**
+ * 解析番茄目录 API 返回的 JSON，提取章节标题列表。
+ * API: /api/reader/directory/detail?bookId=xxx
+ * 返回 {data:{allItemIds:[...], chapterListWithVolume:[[{itemId,title,...}, ...], ...]}}
+ * chapterListWithVolume 是「卷」的数组，每卷是章节对象的数组。
+ */
+export function parseFanqieChapters(json: any): ChapterBrief[] {
+  const out: ChapterBrief[] = []
+  let order = 0
+  const data = json?.data ?? json
+  const volumes = data?.chapterListWithVolume
+  if (Array.isArray(volumes)) {
+    for (const vol of volumes) {
+      if (!Array.isArray(vol)) continue
+      for (const c of vol) {
+        const title = String(c?.title || c?.chapterName || c?.name || '')
+        if (!title) continue
+        order++
+        out.push({ title, order })
+      }
+    }
+  }
+  // 兜底：扁平 chapterList
+  if (out.length === 0 && Array.isArray(data?.chapterList)) {
+    for (const c of data.chapterList) {
+      const title = String(c?.title || c?.chapterName || '')
+      if (!title) continue
+      order++
+      out.push({ title, order })
+    }
+  }
+  return out
 }
 
 function tryParseFanqieDetailFromNext(next: any, bookId: string): BookDetail | null {
@@ -374,28 +574,61 @@ function parseFanqieDetailByRegex(html: string, bookId: string): BookDetail | nu
 
 // ====== 抓取封装 ======
 
-/** 抓取榜单 */
+/**
+ * 抓取榜单。
+ * 番茄新版：rank 配了 rankType 时走 /api/rank/list API（返回 JSON），
+ *           没配 rankType（自定义 URL）则按原 URL 抓取（HTML 或 JSON 均兼容解析）。
+ */
 export async function fetchRank(rank: RankSource): Promise<RankBook[]> {
-  const html = (await window.api.sweep.fetch(rank.url, {
+  if (rank.site === 'fanqie' && rank.rankType) {
+    // 新版 API 模式：拼装 rank_type + gender 参数
+    const gender = rank.gender || 'male'
+    const apiUrl = `${rank.url}?rank_type=${encodeURIComponent(rank.rankType)}&gender=${gender}&page_count=0&page_index=0`
+    const json = (await window.api.sweep.fetch(apiUrl, {
+      referer: rank.referer,
+      timeout: 20000,
+      asJson: true
+    })) as any
+    return parseFanqieRank(JSON.stringify(json))
+  }
+  // 自定义 URL：可能是 HTML 也可能是 JSON，统一抓回文本交给 parseFanqieRank 自动识别
+  const raw = (await window.api.sweep.fetch(rank.url, {
     referer: rank.referer,
     timeout: 20000
   })) as string
-  if (rank.site === 'fanqie') {
-    return parseFanqieRank(html)
-  }
-  // 通用 fallback：尝试番茄解析器（结构类似）
-  return parseFanqieRank(html)
+  return parseFanqieRank(raw)
 }
 
-/** 抓取作品详情（含章节列表） */
+/**
+ * 抓取作品详情（含章节列表）。
+ * 番茄新版详情页 chapterList 为空，需额外调目录 API 拿章节标题。
+ */
 export async function fetchBookDetail(book: RankBook): Promise<BookDetail | null> {
+  if (book.site === 'fanqie') {
+    // 1. 抓详情页 HTML，提取书名/作者/简介/字数/分类/标签
+    const html = (await window.api.sweep.fetch(book.detailUrl, {
+      referer: 'https://fanqienovel.com/',
+      timeout: 20000
+    })) as string
+    const detail = parseFanqieDetail(html, book.bookId)
+    if (!detail) return null
+    // 2. 调目录 API 补全章节标题（失败不阻塞，章节为空也能拆解）
+    try {
+      const dirJson = (await window.api.sweep.fetch(
+        `https://fanqienovel.com/api/reader/directory/detail?bookId=${book.bookId}`,
+        { referer: book.detailUrl, timeout: 20000, asJson: true }
+      )) as any
+      detail.chapters = parseFanqieChapters(dirJson)
+    } catch {
+      // 目录 API 失败不影响主流程，章节留空
+    }
+    return detail
+  }
+  // 通用 fallback
   const html = (await window.api.sweep.fetch(book.detailUrl, {
     referer: 'https://fanqienovel.com/',
     timeout: 20000
   })) as string
-  if (book.site === 'fanqie') {
-    return parseFanqieDetail(html, book.bookId)
-  }
   return parseFanqieDetail(html, book.bookId)
 }
 

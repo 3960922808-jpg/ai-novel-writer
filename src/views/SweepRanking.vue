@@ -393,7 +393,7 @@ async function fetchCustomRank() {
   try {
     const list = await fetchRank(custom)
     if (list.length === 0) {
-      ElMessage.warning('未抓取到作品，URL 可能不是榜单页或站点结构不兼容')
+      ElMessage.warning('未抓取到作品，请确认 URL 是番茄榜单页或榜单 API 地址')
       return
     }
     books.value = list
