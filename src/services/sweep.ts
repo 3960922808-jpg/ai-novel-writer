@@ -430,28 +430,66 @@ export function parseFanqieDetail(html: string, bookId: string): BookDetail | nu
   return parseFanqieDetailByRegex(html, bookId)
 }
 
+/**
+ * 番茄状态字段（数字）→ 可读字符串映射。
+ * 实测：新版番茄详情页 __INITIAL_STATE__.page 没有 bookStatus 字段，
+ *   status / creationStatus 均为数字。creationStatus 表示创作状态：
+ *   0 = 连载中，1 = 已完结（基于样本观察，未知值原样返回）。
+ */
+function mapFanqieStatus(raw: any): string {
+  if (raw == null) return ''
+  const s = String(raw)
+  if (s === '0') return '连载中'
+  if (s === '1') return '已完结'
+  return s
+}
+
+/**
+ * 兼容解析 categoryV2：新版番茄把它序列化成 JSON 字符串（不是数组！），
+ * 例如 "[{\"Name\":\"战神赘婿\",...},{\"Name\":\"都市\",...}]"。
+ * 旧版/部分接口可能仍是数组对象。两种情况统一提取 Name 字段。
+ */
+function extractCategoryV2Tags(raw: any): string[] {
+  if (raw == null) return []
+  let arr: any = raw
+  if (typeof raw === 'string') {
+    try {
+      arr = JSON.parse(raw)
+    } catch {
+      return []
+    }
+  }
+  if (!Array.isArray(arr)) return []
+  const out: string[] = []
+  for (const t of arr) {
+    const name = t?.Name || t?.name
+    if (name && !out.includes(String(name))) out.push(String(name))
+  }
+  return out
+}
+
 /** 从 __INITIAL_STATE__.page 提取详情（新版番茄） */
 function tryParseFanqieDetailFromState(state: any, bookId: string): BookDetail | null {
   const page = state?.page
   if (!page || typeof page !== 'object') return null
   const title = String(page.bookName || page.book_name || page.title || '')
   if (!title) return null
-  // categoryV2 在部分版本是结构化数组，部分版本是字符串，统一兼容
-  const tags: string[] = []
-  if (Array.isArray(page.categoryV2)) {
-    for (const t of page.categoryV2) {
-      const name = t?.Name || t?.name
-      if (name) tags.push(String(name))
-    }
-  }
-  // category 字段形如 "男生/都市/都市重生"，切分后作为标签补充（去重）
-  const categoryStr = String(page.category || '')
+
+  // categoryV2 优先（结构化标签），category 字段形如 "男生/都市/都市重生" 作为补充
+  const tags: string[] = extractCategoryV2Tags(page.categoryV2)
+  const categoryStr = String(page.category || page.completeCategory || '')
   if (categoryStr) {
     for (const seg of categoryStr.split('/')) {
       const s = seg.trim()
       if (s && !tags.includes(s)) tags.push(s)
     }
   }
+
+  // 章节列表：详情页 SSR 的 page.chapterListWithVolume 已含全部章节
+  // （结构同目录 API：[[{title,...},...],...]）。优先用 SSR 数据，
+  // 避免再调一次目录 API；为空时由 fetchBookDetail 兜底调 API 补全。
+  const chapters = parseFanqieChapters({ data: { chapterListWithVolume: page.chapterListWithVolume } })
+
   return {
     bookId,
     title,
@@ -463,8 +501,8 @@ function tryParseFanqieDetailFromState(state: any, bookId: string): BookDetail |
     detailUrl: `https://fanqienovel.com/page/${bookId}`,
     site: 'fanqie',
     tags,
-    chapters: [], // 新版章节需调目录 API，见 fetchFanqieChapters
-    status: String(page.bookStatus || page.status || ''),
+    chapters,
+    status: mapFanqieStatus(page.creationStatus ?? page.bookStatus ?? page.status),
     score: String(page.score || page.rating || '')
   }
 }
@@ -601,26 +639,30 @@ export async function fetchRank(rank: RankSource): Promise<RankBook[]> {
 
 /**
  * 抓取作品详情（含章节列表）。
- * 番茄新版详情页 chapterList 为空，需额外调目录 API 拿章节标题。
+ * 详情页 SSR 的 __INITIAL_STATE__.page 已注入全部章节标题（chapterListWithVolume），
+ * 多数情况下抓一次详情页即可拿到完整数据；仅当 SSR 章节为空（异常/风控）时，
+ * 才兜底调一次目录 API /api/reader/directory/detail 补全。
  */
 export async function fetchBookDetail(book: RankBook): Promise<BookDetail | null> {
   if (book.site === 'fanqie') {
-    // 1. 抓详情页 HTML，提取书名/作者/简介/字数/分类/标签
+    // 1. 抓详情页 HTML，提取书名/作者/简介/字数/分类/标签/章节
     const html = (await window.api.sweep.fetch(book.detailUrl, {
       referer: 'https://fanqienovel.com/',
       timeout: 20000
     })) as string
     const detail = parseFanqieDetail(html, book.bookId)
     if (!detail) return null
-    // 2. 调目录 API 补全章节标题（失败不阻塞，章节为空也能拆解）
-    try {
-      const dirJson = (await window.api.sweep.fetch(
-        `https://fanqienovel.com/api/reader/directory/detail?bookId=${book.bookId}`,
-        { referer: book.detailUrl, timeout: 20000, asJson: true }
-      )) as any
-      detail.chapters = parseFanqieChapters(dirJson)
-    } catch {
-      // 目录 API 失败不影响主流程，章节留空
+    // 2. 仅当 SSR 章节为空时，兜底调目录 API
+    if (detail.chapters.length === 0) {
+      try {
+        const dirJson = (await window.api.sweep.fetch(
+          `https://fanqienovel.com/api/reader/directory/detail?bookId=${book.bookId}`,
+          { referer: book.detailUrl, timeout: 20000, asJson: true }
+        )) as any
+        detail.chapters = parseFanqieChapters(dirJson)
+      } catch {
+        // 目录 API 失败不影响主流程，章节留空
+      }
     }
     return detail
   }
