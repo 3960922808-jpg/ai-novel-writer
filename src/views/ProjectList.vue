@@ -65,7 +65,7 @@
           class="project-card card"
           @click="open(p.id)"
         >
-          <div class="cover" :style="{ background: coverGradient(p) }">
+          <div class="cover" :style="coverStyle(p)">
             <span class="cover-title">{{ p.title }}</span>
             <span class="cover-genre">{{ p.genre }}</span>
             <span class="cover-status" :class="'status-' + statusClass(p.status)">{{ p.status }}</span>
@@ -335,6 +335,18 @@ function coverGradient(p: Project) {
   const a = colors[Math.abs(hash) % colors.length]
   const b = colors[Math.abs(hash >> 4) % colors.length]
   return `linear-gradient(135deg, ${a}, ${b})`
+}
+
+/** 封面样式：有 cover 用图片（叠加渐变遮罩让文字清晰），否则回退渐变色 */
+function coverStyle(p: Project) {
+  if (p.cover) {
+    return {
+      backgroundImage: `linear-gradient(to top, rgba(0,0,0,0.55), rgba(0,0,0,0.1)), url("${p.cover}")`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center'
+    }
+  }
+  return { background: coverGradient(p) }
 }
 
 function formatDate(ts: number) {

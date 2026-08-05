@@ -73,6 +73,24 @@
             <el-button v-else size="small" :icon="Plus" @click="showTagInput">添加标签</el-button>
           </div>
         </el-form-item>
+
+        <el-form-item label="封面">
+          <div class="cover-row">
+            <div class="cover-preview" :style="coverPreviewStyle">
+              <el-icon v-if="!form.cover" :size="28" color="#cbd5e1"><Picture /></el-icon>
+            </div>
+            <div class="cover-actions">
+              <el-button size="small" :icon="MagicStick" :loading="generatingCover" @click="openCoverGenDialog">
+                AI 生成封面
+              </el-button>
+              <el-button size="small" :icon="Upload" @click="uploadCover">上传封面</el-button>
+              <el-button v-if="form.cover" size="small" :icon="Delete" @click="removeCover">移除</el-button>
+              <div class="text-faint text-xs">
+                AI 生成需在「应用设置 → 图片生成」配置 OpenAI 或 Google Key
+              </div>
+            </div>
+          </div>
+        </el-form-item>
       </div>
 
       <div class="card section-card">
@@ -187,12 +205,14 @@ import { ref, reactive, computed, nextTick, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  ArrowLeft, Plus, Check, RefreshLeft, Delete, Warning
+  ArrowLeft, Plus, Check, RefreshLeft, Delete, Warning,
+  Picture, Upload, MagicStick
 } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { useSettingsStore } from '@/stores/settings'
 import * as db from '@/services/db'
-import type { Project } from '@/types'
+import { generateImage } from '@/services/ai'
+import type { Project, ImageGenRequest } from '@/types'
 
 const router = useRouter()
 const route = useRoute()
@@ -299,6 +319,7 @@ async function save() {
       description: form.description,
       genre: form.genre,
       status: form.status,
+      cover: form.cover,
       tags: form.tags,
       wordsTarget: form.wordsTarget,
       settings: { ...form.settings }
@@ -315,6 +336,116 @@ function resetForm() {
   if (projectStore.current) {
     fillForm(projectStore.current)
     ElMessage.info('已重置为上次保存的内容')
+  }
+}
+
+// ====== 封面：预览 / 上传 / 移除 / AI 生成 ======
+const generatingCover = ref(false)
+const coverPrompt = ref('')
+
+const coverPreviewStyle = computed(() => {
+  if (form.cover) {
+    return {
+      backgroundImage: `url("${form.cover}")`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center'
+    }
+  }
+  return {}
+})
+
+/** 上传封面：复用 file.selectImage + readImageBase64 */
+async function uploadCover() {
+  try {
+    const filePath = await window.api.file.selectImage()
+    if (!filePath) return
+    const dataUrl = await window.api.file.readImageBase64(filePath)
+    if (!dataUrl) {
+      ElMessage.error('读取图片失败')
+      return
+    }
+    form.cover = dataUrl
+    ElMessage.success('封面已上传，记得点击「保存」生效')
+  } catch (e: any) {
+    ElMessage.error('上传失败：' + (e?.message || '未知错误'))
+  }
+}
+
+/** 移除封面 */
+function removeCover() {
+  form.cover = ''
+  ElMessage.info('已移除封面，记得点击「保存」生效')
+}
+
+/** 打开 AI 生成对话框：预填提示词，用户可编辑后生成 */
+async function openCoverGenDialog() {
+  const cfg = settingsStore.settings?.imageGen
+  if (!cfg) {
+    ElMessage.warning('请先在「应用设置 → 图片生成」配置')
+    return
+  }
+  // 根据厂商校验 Key
+  const provider = cfg.provider || 'openai'
+  const apiKey = provider === 'google' ? cfg.googleApiKey : cfg.openaiApiKey
+  if (!apiKey || !apiKey.trim()) {
+    ElMessage.warning(`请先在「应用设置 → 图片生成」配置 ${provider === 'google' ? 'Google' : 'OpenAI'} 的 API Key`)
+    return
+  }
+
+  // 预填提示词模板
+  const genre = form.genre || '玄幻'
+  const title = form.title || ''
+  const desc = form.description || ''
+  coverPrompt.value = `小说封面设计，${genre}题材${title ? '，作品《' + title + '》' : ''}${desc ? '，故事核心：' + desc : ''}。要求：高质量插画风格，构图饱满，氛围感强，有人物或场景主视觉，留出标题排版空间，竖版构图。`
+
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '编辑封面生成提示词（建议保留"竖版构图"以确保比例适合封面）',
+      'AI 生成封面',
+      {
+        confirmButtonText: '生成',
+        cancelButtonText: '取消',
+        inputValue: coverPrompt.value,
+        inputType: 'textarea',
+        customClass: 'cover-prompt-dialog'
+      }
+    )
+    if (!value || !value.trim()) return
+    coverPrompt.value = value.trim()
+    await doGenerateCover()
+  } catch {
+    // 用户取消
+  }
+}
+
+/** 实际调用图片生成 */
+async function doGenerateCover() {
+  const cfg = settingsStore.settings?.imageGen
+  if (!cfg) return
+  const provider = cfg.provider || 'openai'
+  const apiKey = provider === 'google' ? cfg.googleApiKey : cfg.openaiApiKey
+  if (!apiKey) {
+    ElMessage.warning('未配置 API Key')
+    return
+  }
+  const req: ImageGenRequest = {
+    provider,
+    apiKey: apiKey.trim(),
+    baseUrl: provider === 'google' ? undefined : (cfg.openaiBaseUrl || 'https://api.openai.com/v1'),
+    model: provider === 'google' ? (cfg.googleModel || 'imagen-4.0-generate-001') : (cfg.openaiModel || 'gpt-image-1'),
+    prompt: coverPrompt.value,
+    size: '1024x1536',
+    n: 1
+  }
+  generatingCover.value = true
+  try {
+    const dataUrl = await generateImage(req)
+    form.cover = dataUrl
+    ElMessage.success('封面已生成，记得点击「保存」生效')
+  } catch (e: any) {
+    ElMessage.error('生成失败：' + (e?.message || '未知错误'))
+  } finally {
+    generatingCover.value = false
   }
 }
 
@@ -362,6 +493,30 @@ function confirmDelete() {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+}
+.cover-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  width: 100%;
+}
+.cover-preview {
+  width: 120px;
+  height: 160px;
+  border-radius: 8px;
+  background: var(--bg-2, #f1f5f9);
+  border: 1px dashed var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.cover-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
 }
 .slider-row {
   display: flex;

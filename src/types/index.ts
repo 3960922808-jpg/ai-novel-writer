@@ -193,6 +193,42 @@ export interface AppSettings {
   wallpaper?: string
   // 背景图毛玻璃模糊度（0-40px，越大越模糊，默认 20）
   wallpaperBlur?: number
+  // 图片生成配置（小说封面生成）。仅支持 OpenAI gpt-image-1 与 Google Imagen
+  imageGen?: ImageGenConfig
+}
+
+/** 图片生成配置 */
+export interface ImageGenConfig {
+  /** 启用的厂商：openai | google */
+  provider: 'openai' | 'google'
+  /** OpenAI：API Key（可与 apiKeys 中的 OpenAI 复用，也可单独填） */
+  openaiApiKey?: string
+  /** OpenAI：BaseURL，默认 https://api.openai.com/v1；中转站可改 */
+  openaiBaseUrl?: string
+  /** OpenAI：模型名，默认 gpt-image-1 */
+  openaiModel?: string
+  /** Google：API Key（Generative Language API） */
+  googleApiKey?: string
+  /** Google：模型名，默认 imagen-4.0-generate-001 */
+  googleModel?: string
+}
+
+/** 图片生成请求（渲染进程 → 主进程 IPC） */
+export interface ImageGenRequest {
+  /** 厂商 */
+  provider: 'openai' | 'google'
+  /** API Key */
+  apiKey: string
+  /** BaseURL（OpenAI 用，含 /v1） */
+  baseUrl?: string
+  /** 模型名 */
+  model: string
+  /** 生成提示词 */
+  prompt: string
+  /** 图片尺寸：'1024x1024' | '1024x1536' | '1536x1024' | 'auto'，默认 1024x1536（竖版适合封面） */
+  size?: string
+  /** 生成数量，默认 1 */
+  n?: number
 }
 
 /** Skill（技能）— 比普通提示词更高级的 AI 工作流 */

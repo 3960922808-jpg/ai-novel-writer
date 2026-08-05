@@ -58,7 +58,9 @@ const api = {
       return { promise, cancel }
     },
     // 非流式
-    chat: (req: any) => ipcRenderer.invoke('ai:chat', req)
+    chat: (req: any) => ipcRenderer.invoke('ai:chat', req),
+    // 图片生成（小说封面）：返回 base64 data URL
+    generateImage: (req: any) => ipcRenderer.invoke('ai:image-generate', req)
   },
 
   // ====== 导出 ======

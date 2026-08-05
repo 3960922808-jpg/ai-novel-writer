@@ -249,6 +249,52 @@
         </div>
       </div>
 
+      <div v-if="form.imageGen" class="card section-card">
+        <div class="section-title">图片生成（封面）</div>
+        <div class="text-faint text-xs" style="margin-bottom: 12px">
+          用于在项目设置中 AI 生成小说封面。仅支持 OpenAI（gpt-image-1）与 Google Imagen，需自行配置对应 API Key。
+        </div>
+
+        <el-form-item label="使用厂商">
+          <el-radio-group v-model="form.imageGen.provider">
+            <el-radio-button label="openai">OpenAI (gpt-image-1)</el-radio-button>
+            <el-radio-button label="google">Google Imagen</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+
+        <!-- OpenAI 配置 -->
+        <template v-if="form.imageGen.provider === 'openai'">
+          <el-form-item label="BaseURL">
+            <el-input v-model="form.imageGen.openaiBaseUrl" placeholder="https://api.openai.com/v1（中转站可改）" />
+          </el-form-item>
+          <el-form-item label="API Key">
+            <el-input v-model="form.imageGen.openaiApiKey" type="password" show-password placeholder="sk-..." />
+            <div class="text-faint text-xs" style="margin-top: 4px">
+              可填入与上方 OpenAI 相同的 Key，也可用独立中转站 Key
+            </div>
+          </el-form-item>
+          <el-form-item label="模型">
+            <el-input v-model="form.imageGen.openaiModel" placeholder="gpt-image-1" />
+            <div class="text-faint text-xs" style="margin-top: 4px">
+              gpt-image-1 为 OpenAI 最新图片模型；旧 Key 可填 dall-e-3
+            </div>
+          </el-form-item>
+        </template>
+
+        <!-- Google Imagen 配置 -->
+        <template v-if="form.imageGen.provider === 'google'">
+          <el-form-item label="API Key">
+            <el-input v-model="form.imageGen.googleApiKey" type="password" show-password placeholder="AIza..." />
+            <div class="text-faint text-xs" style="margin-top: 4px">
+              Generative Language API Key，可在 Google AI Studio 获取
+            </div>
+          </el-form-item>
+          <el-form-item label="模型">
+            <el-input v-model="form.imageGen.googleModel" placeholder="imagen-4.0-generate-001" />
+          </el-form-item>
+        </template>
+      </div>
+
       <div class="card section-card">
         <div class="section-title">联网搜索</div>
 
@@ -366,7 +412,15 @@ const form = reactive<AppSettings>({
   askMode: 'auto',
     zoomLevel: 100,
     wallpaper: '',
-    wallpaperBlur: 20
+    wallpaperBlur: 20,
+    imageGen: {
+      provider: 'openai',
+      openaiApiKey: '',
+      openaiBaseUrl: 'https://api.openai.com/v1',
+      openaiModel: 'gpt-image-1',
+      googleApiKey: '',
+      googleModel: 'imagen-4.0-generate-001'
+    }
   })
 
 // 当前版本号 — 从 package.json 注入到 vite define 或回退到 1.0.0
@@ -664,6 +718,22 @@ function fillForm(s: AppSettings) {
   // wallpaper 兼容
   if (!form.wallpaper) form.wallpaper = ''
   if (form.wallpaperBlur === undefined || form.wallpaperBlur === null) form.wallpaperBlur = 20
+  // imageGen 兼容：老数据没有此字段
+  if (!form.imageGen || typeof form.imageGen !== 'object') {
+    form.imageGen = {
+      provider: 'openai',
+      openaiApiKey: '',
+      openaiBaseUrl: 'https://api.openai.com/v1',
+      openaiModel: 'gpt-image-1',
+      googleApiKey: '',
+      googleModel: 'imagen-4.0-generate-001'
+    }
+  } else {
+    if (!form.imageGen.provider) form.imageGen.provider = 'openai'
+    if (!form.imageGen.openaiBaseUrl) form.imageGen.openaiBaseUrl = 'https://api.openai.com/v1'
+    if (!form.imageGen.openaiModel) form.imageGen.openaiModel = 'gpt-image-1'
+    if (!form.imageGen.googleModel) form.imageGen.googleModel = 'imagen-4.0-generate-001'
+  }
   // 表单填充完成后再开启自动保存，避免初始化赋值触发回写
   nextTick(() => { autoSaveReady.value = true })
 }
@@ -767,7 +837,8 @@ async function save() {
       autoUpdateCheck: form.autoUpdateCheck,
       zoomLevel: form.zoomLevel,
       wallpaper: form.wallpaper,
-      wallpaperBlur: form.wallpaperBlur
+      wallpaperBlur: form.wallpaperBlur,
+      imageGen: JSON.parse(JSON.stringify(form.imageGen))
     })
     ElMessage.success('已保存')
   } catch (e: any) {

@@ -1,5 +1,5 @@
 import { ipcMain, IpcMainInvokeEvent } from 'electron'
-import type { AIRequest } from '../../src/types'
+import type { AIRequest, ImageGenRequest } from '../../src/types'
 
 /**
  * 安全地给渲染进程发消息：webContents 可能在流式过程中被销毁（用户关窗），
@@ -264,4 +264,103 @@ export function registerAIIPC() {
       throw e
     }
   })
+
+  // ====== 图片生成（小说封面）======
+  // 仅支持 OpenAI gpt-image-1 与 Google Imagen，二者鉴权与 endpoint 不同，按 provider 分支
+  ipcMain.handle('ai:image-generate', async (_e, req: ImageGenRequest): Promise<string> => {
+    if (!req.apiKey) throw new Error('未配置图片生成 API Key')
+    if (!req.prompt) throw new Error('提示词不能为空')
+    try {
+      if (req.provider === 'google') {
+        return await generateImageGoogle(req)
+      }
+      return await generateImageOpenAI(req)
+    } catch (e: any) {
+      // 保留原始错误信息
+      throw e
+    }
+  })
+}
+
+/** OpenAI gpt-image-1 / DALL-E 系列：POST {baseUrl}/images/generations */
+async function generateImageOpenAI(req: ImageGenRequest): Promise<string> {
+  const baseUrl = (req.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '')
+  const url = `${baseUrl}/images/generations`
+  const model = req.model || 'gpt-image-1'
+  const size = req.size || '1024x1536'
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${req.apiKey}`
+    },
+    body: JSON.stringify({
+      model,
+      prompt: req.prompt,
+      n: req.n || 1,
+      size,
+      // gpt-image-1 只支持 b64_json；dall-e-3 支持 url。统一要 b64 便于直接存库
+      response_format: 'b64_json'
+    })
+  })
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => '')
+    throw new Error(`OpenAI 图片生成失败 ${resp.status}: ${txt.slice(0, 500) || resp.statusText}`)
+  }
+  const json = await resp.json()
+  const b64 = json?.data?.[0]?.b64_json
+  if (!b64) {
+    // 某些中转站只返回 url，降级取 url（前端再下载转 base64 较复杂，这里直接报错引导用 b64）
+    if (json?.data?.[0]?.url) {
+      throw new Error('接口返回的是 URL 而非 base64，请确认模型支持 response_format=b64_json')
+    }
+    throw new Error('OpenAI 返回数据缺少 b64_json 字段')
+  }
+  return `data:image/png;base64,${b64}`
+}
+
+/** Google Imagen：POST {baseUrl}/models/{model}:predict?key=apiKey */
+async function generateImageGoogle(req: ImageGenRequest): Promise<string> {
+  // Generative Language API（最易接入，无需 Vertex AI 项目配置）
+  const baseUrl = (req.baseUrl || 'https://generativelanguage.googleapis.com/v1beta').replace(/\/+$/, '')
+  const model = req.model || 'imagen-4.0-generate-001'
+  // 尺寸映射：Google Imagen 用 aspectRatio，OpenAI 风格的 size 需转换
+  const aspectRatio = sizeToGoogleAspect(req.size)
+  const url = `${baseUrl}/models/${encodeURIComponent(model)}:predict`
+  const resp = await fetch(`${url}?key=${encodeURIComponent(req.apiKey)}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+      // Generative Language API 用 query 参数 key 鉴权，不使用 Authorization 头
+    },
+    body: JSON.stringify({
+      instances: [{ prompt: req.prompt }],
+      parameters: {
+        sampleCount: req.n || 1,
+        ...(aspectRatio ? { aspectRatio } : {})
+      }
+    })
+  })
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => '')
+    throw new Error(`Google 图片生成失败 ${resp.status}: ${txt.slice(0, 500) || resp.statusText}`)
+  }
+  const json = await resp.json()
+  const b64 = json?.predictions?.[0]?.bytesBase64Encoded
+  if (!b64) {
+    throw new Error('Google 返回数据缺少 bytesBase64Encoded 字段')
+  }
+  return `data:image/png;base64,${b64}`
+}
+
+/** OpenAI size → Google Imagen aspectRatio 映射 */
+function sizeToGoogleAspect(size?: string): string | undefined {
+  if (!size || size === 'auto') return undefined
+  const m = size.match(/^(\d+)x(\d+)$/)
+  if (!m) return undefined
+  const w = parseInt(m[1], 10)
+  const h = parseInt(m[2], 10)
+  if (w === h) return '1:1'
+  if (w > h) return '16:9' // 横版
+  return '9:16' // 竖版（封面默认 1024x1536 → 9:16）
 }

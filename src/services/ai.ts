@@ -1,5 +1,5 @@
 // AI 服务封装
-import type { AIRequest, ChatMessage } from '@/types'
+import type { AIRequest, ChatMessage, ImageGenRequest } from '@/types'
 
 /** 流式调用，onChunk 接收增量文本，返回完整文本 */
 export function streamChat(req: AIRequest, onChunk: (text: string) => void): Promise<string> {
@@ -13,6 +13,11 @@ export function streamChat(req: AIRequest, onChunk: (text: string) => void): Pro
 /** 非流式调用 */
 export function chat(req: AIRequest): Promise<string> {
   return window.api.ai.chat(req)
+}
+
+/** 图片生成（小说封面）：返回 base64 data URL */
+export function generateImage(req: ImageGenRequest): Promise<string> {
+  return window.api.ai.generateImage(req)
 }
 
 /** 构造 AI 请求 */
