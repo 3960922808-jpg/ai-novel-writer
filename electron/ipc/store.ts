@@ -237,7 +237,13 @@ export function registerStoreIPC() {
         themeMode: 'light',
         zoomLevel: 100,
         wallpaper: '',
-        wallpaperBlur: 20
+        wallpaperBlur: 20,
+        accentColor: '#5b9bd5',
+        wallpaperOpacity: 100,
+        wallpaperOverlay: 20,
+        panelOpacity: 72,
+        wallpaperFit: 'cover',
+        wallpaperPosition: 'center'
       }
       await writeDB()
       console.log('[settings] 首次创建默认 settings')
@@ -276,6 +282,15 @@ export function registerStoreIPC() {
       db.data.settings.wallpaperBlur = 20
       settingsChanged = true
     }
+    if (db.data.settings && db.data.settings.accentColor === undefined) {
+      db.data.settings.accentColor = '#5b9bd5'
+      db.data.settings.wallpaperOpacity = 100
+      db.data.settings.wallpaperOverlay = 20
+      db.data.settings.panelOpacity = 72
+      db.data.settings.wallpaperFit = 'cover'
+      db.data.settings.wallpaperPosition = 'center'
+      settingsChanged = true
+    }
     if (safeStorage.isEncryptionAvailable()) {
       const protectedSettings = protectSettingsSecrets(db.data.settings)
       if (JSON.stringify(protectedSettings) !== JSON.stringify(db.data.settings)) {
@@ -289,8 +304,36 @@ export function registerStoreIPC() {
 
   ipcMain.handle('store:settings:save', async (_e, s: any) => {
     if (!s || typeof s !== 'object' || Array.isArray(s)) throw new Error('设置数据格式无效')
+    const normalized = { ...s }
+    const clampAppearanceNumber = (key: string, min: number, max: number) => {
+      if (!(key in normalized)) return
+      const value = Number(normalized[key])
+      if (!Number.isFinite(value)) throw new Error(`${key} 设置无效`)
+      normalized[key] = Math.max(min, Math.min(max, Math.round(value)))
+    }
+    if ('accentColor' in normalized && !/^#[0-9a-fA-F]{6}$/.test(normalized.accentColor)) {
+      throw new Error('主题颜色格式无效')
+    }
+    clampAppearanceNumber('wallpaperBlur', 0, 40)
+    clampAppearanceNumber('wallpaperOpacity', 20, 100)
+    clampAppearanceNumber('wallpaperOverlay', 0, 90)
+    clampAppearanceNumber('panelOpacity', 35, 100)
+    if ('wallpaperFit' in normalized && !['cover', 'contain'].includes(normalized.wallpaperFit)) {
+      throw new Error('壁纸显示方式无效')
+    }
+    if ('wallpaperPosition' in normalized && !['top', 'center', 'bottom'].includes(normalized.wallpaperPosition)) {
+      throw new Error('壁纸位置无效')
+    }
+    if ('wallpaper' in normalized) {
+      if (typeof normalized.wallpaper !== 'string' || normalized.wallpaper.length > 36 * 1024 * 1024) {
+        throw new Error('背景图片数据无效或文件过大')
+      }
+      if (normalized.wallpaper && !/^data:image\/(png|jpeg|webp|gif);base64,/i.test(normalized.wallpaper)) {
+        throw new Error('背景图片格式无效')
+      }
+    }
     const db = getDB()
-    db.data.settings = protectSettingsSecrets({ ...db.data.settings, ...s })
+    db.data.settings = protectSettingsSecrets({ ...db.data.settings, ...normalized })
     await writeDB()
     return revealSettingsSecrets(db.data.settings)
   })

@@ -32,6 +32,31 @@
           </span>
         </el-form-item>
 
+        <el-form-item label="主题颜色">
+          <div class="color-settings">
+            <div class="color-presets">
+              <button
+                v-for="item in accentPresets"
+                :key="item.value"
+                type="button"
+                class="color-swatch"
+                :class="{ active: form.accentColor === item.value }"
+                :style="{ '--swatch-color': item.value }"
+                :title="item.label"
+                @click="setAccentColor(item.value)"
+              ><span></span></button>
+              <el-color-picker
+                v-model="form.accentColor"
+                :predefine="accentPresets.map(item => item.value)"
+                color-format="hex"
+                @active-change="onAccentPreview"
+                @change="onAccentCommit"
+              />
+            </div>
+            <span class="text-faint text-xs">按钮、选中项、链接和编辑器焦点会同步换色</span>
+          </div>
+        </el-form-item>
+
         <el-form-item label="字体大小">
           <div class="slider-row">
             <el-slider v-model="form.fontSize" :min="12" :max="20" :step="1" style="flex: 1" @input="onFontChange" />
@@ -59,6 +84,17 @@
           </span>
         </el-form-item>
 
+        <div class="appearance-preview" :class="{ 'with-wallpaper': !!form.wallpaper }" :style="appearancePreviewStyle">
+          <div class="preview-sidebar"></div>
+          <div class="preview-body">
+            <span class="preview-pill"></span>
+            <span class="preview-line long"></span>
+            <span class="preview-line"></span>
+            <span class="preview-button">创作</span>
+          </div>
+          <span class="preview-label">实时预览</span>
+        </div>
+
         <el-form-item label="背景图片">
           <div class="wallpaper-row">
             <div class="wallpaper-preview" :style="wallpaperPreviewStyle">
@@ -72,9 +108,7 @@
                 :icon="Delete"
                 @click="removeWallpaper"
               >移除背景</el-button>
-              <span class="text-faint text-xs">
-                上传后呈毛玻璃效果，既能看清又有点看不清
-              </span>
+              <span class="text-faint text-xs">支持 JPG、PNG、WebP，设置会保存在本机并跨重启生效</span>
             </div>
           </div>
         </el-form-item>
@@ -88,6 +122,41 @@
             数值越大背景越模糊，0=清晰可见，40=高度模糊
           </span>
         </el-form-item>
+
+        <template v-if="form.wallpaper">
+          <el-form-item label="壁纸亮度">
+            <div class="slider-row">
+              <el-slider v-model="form.wallpaperOpacity" :min="20" :max="100" :step="1" style="flex: 1" @input="onAppearanceSliderChange" />
+              <span class="slider-val">{{ form.wallpaperOpacity }}%</span>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="遮罩强度">
+            <div class="slider-row">
+              <el-slider v-model="form.wallpaperOverlay" :min="0" :max="90" :step="1" style="flex: 1" @input="onAppearanceSliderChange" />
+              <span class="slider-val">{{ form.wallpaperOverlay }}%</span>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="面板透明度">
+            <div class="slider-row">
+              <el-slider v-model="form.panelOpacity" :min="35" :max="100" :step="1" style="flex: 1" @input="onAppearanceSliderChange" />
+              <span class="slider-val">{{ form.panelOpacity }}%</span>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="图片显示">
+            <div class="wallpaper-layout-options">
+              <el-segmented v-model="form.wallpaperFit" :options="wallpaperFitOptions" @change="onAppearanceSliderChange" />
+              <el-segmented v-model="form.wallpaperPosition" :options="wallpaperPositionOptions" @change="onAppearanceSliderChange" />
+            </div>
+          </el-form-item>
+        </template>
+
+        <div class="appearance-actions">
+          <el-button size="small" @click="resetAppearance">恢复默认外观</el-button>
+          <span class="text-faint text-xs">所有外观修改都会自动保存</span>
+        </div>
       </div>
 
       <div class="card section-card">
@@ -413,6 +482,12 @@ const form = reactive<AppSettings>({
     zoomLevel: 100,
     wallpaper: '',
     wallpaperBlur: 20,
+    accentColor: '#5b9bd5',
+    wallpaperOpacity: 100,
+    wallpaperOverlay: 20,
+    panelOpacity: 72,
+    wallpaperFit: 'cover',
+    wallpaperPosition: 'center',
     imageGen: {
       provider: 'openai',
       openaiApiKey: '',
@@ -430,6 +505,25 @@ const checking = ref(false)
 const checkResult = ref('')
 const lastCheckTime = ref('')
 let lastReleaseUrl = ''
+
+const accentPresets = [
+  { label: '雾霾蓝', value: '#5b9bd5' },
+  { label: '石墨灰', value: '#70747a' },
+  { label: '松石绿', value: '#3d9b8f' },
+  { label: '葡萄紫', value: '#8067c5' },
+  { label: '玫瑰粉', value: '#c96f91' },
+  { label: '暖杏橙', value: '#c9854f' },
+  { label: '朱砂红', value: '#bd5b5b' }
+]
+const wallpaperFitOptions = [
+  { label: '铺满', value: 'cover' },
+  { label: '完整显示', value: 'contain' }
+]
+const wallpaperPositionOptions = [
+  { label: '顶部', value: 'top' },
+  { label: '居中', value: 'center' },
+  { label: '底部', value: 'bottom' }
+]
 
 async function checkNow() {
   checking.value = true
@@ -705,6 +799,12 @@ function fillForm(s: AppSettings) {
   // wallpaper 兼容
   if (!form.wallpaper) form.wallpaper = ''
   if (form.wallpaperBlur === undefined || form.wallpaperBlur === null) form.wallpaperBlur = 20
+  if (!form.accentColor) form.accentColor = '#5b9bd5'
+  if (form.wallpaperOpacity === undefined) form.wallpaperOpacity = 100
+  if (form.wallpaperOverlay === undefined) form.wallpaperOverlay = 20
+  if (form.panelOpacity === undefined) form.panelOpacity = 72
+  if (!form.wallpaperFit) form.wallpaperFit = 'cover'
+  if (!form.wallpaperPosition) form.wallpaperPosition = 'center'
   // imageGen 兼容：老数据没有此字段
   if (!form.imageGen || typeof form.imageGen !== 'object') {
     form.imageGen = {
@@ -730,6 +830,40 @@ function onThemeChange() {
   settingsStore.update({ themeMode: form.themeMode })
 }
 
+function previewAppearance(patch: Partial<AppSettings>) {
+  if (!settingsStore.settings) return
+  Object.assign(settingsStore.settings, patch)
+  settingsStore.applyTheme()
+}
+
+let appearanceSaveTimer: ReturnType<typeof setTimeout> | null = null
+function persistAppearance(patch: Partial<AppSettings>, immediate = false) {
+  previewAppearance(patch)
+  if (appearanceSaveTimer) clearTimeout(appearanceSaveTimer)
+  const commit = () => settingsStore.update(patch).catch((error: any) => {
+    ElMessage.error('外观保存失败：' + (error?.message || '未知错误'))
+  })
+  if (immediate) commit()
+  else appearanceSaveTimer = setTimeout(commit, 180)
+}
+
+function setAccentColor(color: string) {
+  form.accentColor = color
+  persistAppearance({ accentColor: color }, true)
+}
+
+function onAccentPreview(color: string | null) {
+  if (!color) return
+  form.accentColor = color
+  previewAppearance({ accentColor: color })
+}
+
+function onAccentCommit(color: string | null) {
+  if (!color) return
+  form.accentColor = color
+  persistAppearance({ accentColor: color }, true)
+}
+
 function onFontChange() {
   // 字体大小/编辑器字体实时预览
   settingsStore.update({ fontSize: form.fontSize, editorFont: form.editorFont })
@@ -750,6 +884,15 @@ const wallpaperPreviewStyle = computed(() => {
   }
 })
 
+const appearancePreviewStyle = computed(() => ({
+  '--preview-accent': form.accentColor || '#5b9bd5',
+  '--preview-image': form.wallpaper ? `url("${form.wallpaper}")` : 'none',
+  '--preview-position': form.wallpaperPosition || 'center',
+  '--preview-size': form.wallpaperFit || 'cover',
+  '--preview-image-opacity': String((form.wallpaperOpacity ?? 100) / 100),
+  '--preview-panel-opacity': String((form.panelOpacity ?? 72) / 100)
+}))
+
 async function pickWallpaper() {
   try {
     const filePath = await window.api.file.selectImage()
@@ -761,7 +904,15 @@ async function pickWallpaper() {
       return
     }
     form.wallpaper = dataUrl
-    await settingsStore.update({ wallpaper: dataUrl, wallpaperBlur: form.wallpaperBlur })
+    await settingsStore.update({
+      wallpaper: dataUrl,
+      wallpaperBlur: form.wallpaperBlur,
+      wallpaperOpacity: form.wallpaperOpacity,
+      wallpaperOverlay: form.wallpaperOverlay,
+      panelOpacity: form.panelOpacity,
+      wallpaperFit: form.wallpaperFit,
+      wallpaperPosition: form.wallpaperPosition
+    })
     ElMessage.success('背景图已设置')
   } catch (e: any) {
     ElMessage.error('上传失败：' + (e?.message || '未知错误'))
@@ -775,7 +926,44 @@ function removeWallpaper() {
 }
 
 function onWallpaperBlurChange() {
-  settingsStore.update({ wallpaperBlur: form.wallpaperBlur })
+  onAppearanceSliderChange()
+}
+
+function onAppearanceSliderChange() {
+  persistAppearance({
+    wallpaperBlur: form.wallpaperBlur,
+    wallpaperOpacity: form.wallpaperOpacity,
+    wallpaperOverlay: form.wallpaperOverlay,
+    panelOpacity: form.panelOpacity,
+    wallpaperFit: form.wallpaperFit,
+    wallpaperPosition: form.wallpaperPosition
+  })
+}
+
+async function resetAppearance() {
+  Object.assign(form, {
+    themeMode: 'light',
+    accentColor: '#5b9bd5',
+    wallpaper: '',
+    wallpaperBlur: 20,
+    wallpaperOpacity: 100,
+    wallpaperOverlay: 20,
+    panelOpacity: 72,
+    wallpaperFit: 'cover',
+    wallpaperPosition: 'center'
+  })
+  await settingsStore.update({
+    themeMode: 'light',
+    accentColor: '#5b9bd5',
+    wallpaper: '',
+    wallpaperBlur: 20,
+    wallpaperOpacity: 100,
+    wallpaperOverlay: 20,
+    panelOpacity: 72,
+    wallpaperFit: 'cover',
+    wallpaperPosition: 'center'
+  })
+  ElMessage.success('已恢复默认外观')
 }
 
 function showModelInput(idx: number) {
@@ -815,6 +1003,7 @@ async function save() {
     await settingsStore.update({
       apiKeys: JSON.parse(JSON.stringify(form.apiKeys)),
       theme: form.theme,
+      themeMode: form.themeMode,
       fontSize: form.fontSize,
       editorFont: form.editorFont,
       autoSaveInterval: form.autoSaveInterval,
@@ -825,6 +1014,12 @@ async function save() {
       zoomLevel: form.zoomLevel,
       wallpaper: form.wallpaper,
       wallpaperBlur: form.wallpaperBlur,
+      accentColor: form.accentColor,
+      wallpaperOpacity: form.wallpaperOpacity,
+      wallpaperOverlay: form.wallpaperOverlay,
+      panelOpacity: form.panelOpacity,
+      wallpaperFit: form.wallpaperFit,
+      wallpaperPosition: form.wallpaperPosition,
       imageGen: JSON.parse(JSON.stringify(form.imageGen))
     })
     ElMessage.success('已保存')
@@ -923,6 +1118,91 @@ onBeforeUnmount(() => {
   color: var(--text-2);
   font-size: 13px;
 }
+.color-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  width: 100%;
+}
+.color-presets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.color-swatch {
+  width: 31px;
+  height: 31px;
+  padding: 3px;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+.color-swatch span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: var(--swatch-color);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.32);
+}
+.color-swatch:hover { transform: translateY(-1px) scale(1.05); }
+.color-swatch.active {
+  border-color: var(--swatch-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--swatch-color) 16%, transparent);
+}
+.appearance-preview {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 126px;
+  margin: 2px 0 20px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background-color: var(--panel-2);
+  background-image: var(--preview-image);
+  background-size: var(--preview-size, cover);
+  background-position: var(--preview-position, center);
+  box-shadow: var(--shadow);
+}
+.appearance-preview::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+  opacity: .18;
+}
+.preview-sidebar {
+  position: relative;
+  z-index: 1;
+  width: 28%;
+  margin: 9px;
+  border-radius: 13px;
+  background: rgba(255,255,255,var(--preview-panel-opacity));
+  box-shadow: 0 5px 20px rgba(15,23,42,.08);
+}
+html.dark .preview-sidebar { background: rgba(30,41,59,var(--preview-panel-opacity)); }
+.preview-body {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  margin: 9px 9px 9px 0;
+  padding: 18px;
+  border-radius: 13px;
+  background: rgba(255,255,255,var(--preview-panel-opacity));
+  box-shadow: 0 5px 20px rgba(15,23,42,.08);
+}
+html.dark .preview-body { background: rgba(30,41,59,var(--preview-panel-opacity)); }
+.preview-pill { display: block; width: 50px; height: 9px; margin-bottom: 17px; border-radius: 999px; background: var(--preview-accent); }
+.preview-line { display: block; width: 52%; height: 6px; margin-top: 8px; border-radius: 999px; background: rgba(100,116,139,.18); }
+.preview-line.long { width: 82%; }
+.preview-button { position: absolute; right: 15px; bottom: 13px; padding: 4px 13px; border-radius: 999px; color: white; background: var(--preview-accent); font-size: 10px; }
+.preview-label { position: absolute; z-index: 2; right: 12px; top: 10px; padding: 3px 8px; border-radius: 999px; color: var(--text-2); background: rgba(255,255,255,.72); font-size: 9px; backdrop-filter: blur(8px); }
+.wallpaper-layout-options { display: flex; flex-wrap: wrap; gap: 10px; width: 100%; }
+.appearance-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 8px; }
 .wallpaper-row {
   display: flex;
   align-items: center;
@@ -930,9 +1210,9 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 .wallpaper-preview {
-  width: 88px;
-  height: 56px;
-  border-radius: 6px;
+  width: 118px;
+  height: 74px;
+  border-radius: 14px;
   border: 1px dashed var(--border);
   background: var(--panel-2);
   display: flex;

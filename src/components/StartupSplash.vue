@@ -34,7 +34,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const props = defineProps<{ ready?: boolean }>()
 
-const version = '2.1.3'
+const version = '2.1.4'
 const visible = ref(true)
 const progress = ref(4)
 const startedAt = Date.now()

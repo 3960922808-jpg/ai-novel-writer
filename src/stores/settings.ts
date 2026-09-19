@@ -38,6 +38,7 @@ export const useSettingsStore = defineStore('settings', () => {
         isDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
       }
       document.documentElement.classList.toggle('dark', isDark)
+      applyAccentColor(isDark)
       // 同步 theme 字段（向后兼容旧代码读取 settings.theme）
       if (settings.value) {
         settings.value.theme = isDark ? 'dark' : 'light'
@@ -61,6 +62,38 @@ export const useSettingsStore = defineStore('settings', () => {
       applyWallpaper(isDark)
     }
 
+    function hexToRgb(hex: string): [number, number, number] | null {
+      const normalized = String(hex || '').trim().replace(/^#/, '')
+      if (!/^[0-9a-fA-F]{6}$/.test(normalized)) return null
+      return [
+        parseInt(normalized.slice(0, 2), 16),
+        parseInt(normalized.slice(2, 4), 16),
+        parseInt(normalized.slice(4, 6), 16)
+      ]
+    }
+
+    function mixColor(rgb: [number, number, number], target: number, ratio: number) {
+      return `rgb(${rgb.map(value => Math.round(value + (target - value) * ratio)).join(', ')})`
+    }
+
+    /** 将个性化颜色同步到应用变量和 Element Plus 组件变量。 */
+    function applyAccentColor(isDark: boolean) {
+      const root = document.documentElement
+      const color = settings.value?.accentColor || '#5b9bd5'
+      const rgb = hexToRgb(color) || [91, 155, 213]
+      const normalized = `#${rgb.map(value => value.toString(16).padStart(2, '0')).join('')}`
+      root.style.setProperty('--primary', normalized)
+      root.style.setProperty('--accent', normalized)
+      root.style.setProperty('--primary-dark', mixColor(rgb, 0, isDark ? 0.06 : 0.18))
+      root.style.setProperty('--primary-light', mixColor(rgb, isDark ? 0 : 255, isDark ? 0.62 : 0.86))
+      root.style.setProperty('--primary-rgb', rgb.join(', '))
+      root.style.setProperty('--el-color-primary', normalized)
+      root.style.setProperty('--el-color-primary-dark-2', mixColor(rgb, 0, 0.2))
+      for (const level of [3, 5, 7, 8, 9]) {
+        root.style.setProperty(`--el-color-primary-light-${level}`, mixColor(rgb, isDark ? 0 : 255, level / 10))
+      }
+    }
+
     /**
      * 应用自定义背景图：
      * - 有壁纸时，背景层显示图片并模糊，同时把 --bg/--panel/--panel-2 覆盖为半透明，
@@ -71,23 +104,40 @@ export const useSettingsStore = defineStore('settings', () => {
       const root = document.documentElement
       const wp = settings.value?.wallpaper
       const blur = settings.value?.wallpaperBlur ?? 20
+      const imageOpacity = Math.max(20, Math.min(100, settings.value?.wallpaperOpacity ?? 100)) / 100
+      const overlay = Math.max(0, Math.min(90, settings.value?.wallpaperOverlay ?? 20)) / 100
+      const panelOpacity = Math.max(35, Math.min(100, settings.value?.panelOpacity ?? 72)) / 100
+      const fit = settings.value?.wallpaperFit === 'contain' ? 'contain' : 'cover'
+      const position = ['top', 'bottom'].includes(settings.value?.wallpaperPosition || '')
+        ? settings.value!.wallpaperPosition!
+        : 'center'
       if (wp) {
         root.style.setProperty('--app-wallpaper', `url("${wp}")`)
         root.style.setProperty('--app-wallpaper-blur', `${blur}px`)
+        root.style.setProperty('--app-wallpaper-opacity', String(imageOpacity))
+        root.style.setProperty('--app-wallpaper-size', fit)
+        root.style.setProperty('--app-wallpaper-position', position)
+        root.style.setProperty('--app-wallpaper-overlay', isDark
+          ? `rgba(3, 7, 18, ${overlay})`
+          : `rgba(255, 255, 255, ${overlay})`)
         root.classList.add('has-wallpaper')
         // 覆盖为半透明，让面板透出模糊背景
         if (isDark) {
-          root.style.setProperty('--bg', 'rgba(15, 23, 42, 0.55)')
-          root.style.setProperty('--panel', 'rgba(30, 41, 59, 0.65)')
-          root.style.setProperty('--panel-2', 'rgba(51, 65, 85, 0.7)')
+          root.style.setProperty('--bg', `rgba(15, 23, 42, ${Math.max(.35, panelOpacity - .12)})`)
+          root.style.setProperty('--panel', `rgba(30, 41, 59, ${panelOpacity})`)
+          root.style.setProperty('--panel-2', `rgba(51, 65, 85, ${Math.min(1, panelOpacity + .06)})`)
         } else {
-          root.style.setProperty('--bg', 'rgba(255, 255, 255, 0.5)')
-          root.style.setProperty('--panel', 'rgba(255, 255, 255, 0.65)')
-          root.style.setProperty('--panel-2', 'rgba(241, 245, 249, 0.72)')
+          root.style.setProperty('--bg', `rgba(255, 255, 255, ${Math.max(.35, panelOpacity - .14)})`)
+          root.style.setProperty('--panel', `rgba(255, 255, 255, ${panelOpacity})`)
+          root.style.setProperty('--panel-2', `rgba(241, 245, 249, ${Math.min(1, panelOpacity + .07)})`)
         }
       } else {
         root.style.setProperty('--app-wallpaper', 'none')
         root.style.removeProperty('--app-wallpaper-blur')
+        root.style.removeProperty('--app-wallpaper-opacity')
+        root.style.removeProperty('--app-wallpaper-size')
+        root.style.removeProperty('--app-wallpaper-position')
+        root.style.removeProperty('--app-wallpaper-overlay')
         root.classList.remove('has-wallpaper')
         root.style.removeProperty('--bg')
         root.style.removeProperty('--panel')
@@ -108,6 +158,8 @@ export const useSettingsStore = defineStore('settings', () => {
       if (mode === 'auto') {
         document.documentElement.classList.toggle('dark', e.matches)
         if (settings.value) settings.value.theme = e.matches ? 'dark' : 'light'
+        applyAccentColor(e.matches)
+        applyWallpaper(e.matches)
       }
     }
     // addEventListener 在新浏览器，addListener 在老 Safari

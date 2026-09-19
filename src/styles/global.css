@@ -23,6 +23,10 @@
   /* 背景图相关变量（由 settings.applyWallpaper 设置） */
   --app-wallpaper: none;
   --app-wallpaper-blur: 20px;
+  --app-wallpaper-opacity: 1;
+  --app-wallpaper-size: cover;
+  --app-wallpaper-position: center;
+  --app-wallpaper-overlay: rgba(255, 255, 255, 0.2);
 }
 
 html.dark {
@@ -66,8 +70,8 @@ html, body, #app {
   inset: 0;
   z-index: -2;
   background-image: var(--app-wallpaper, none);
-  background-size: cover;
-  background-position: center;
+  background-size: var(--app-wallpaper-size, cover);
+  background-position: var(--app-wallpaper-position, center);
   background-repeat: no-repeat;
   filter: blur(var(--app-wallpaper-blur, 20px));
   /* 放大 10% 防止模糊后边缘漏白 */
@@ -77,13 +81,13 @@ html, body, #app {
   transition: opacity 0.4s ease;
 }
 html.has-wallpaper .app-wallpaper-layer {
-  opacity: 1;
+  opacity: var(--app-wallpaper-opacity, 1);
 }
 .app-wallpaper-overlay {
   position: fixed;
   inset: 0;
   z-index: -1;
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--app-wallpaper-overlay, rgba(255, 255, 255, 0.2));
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.4s ease;
@@ -91,9 +95,7 @@ html.has-wallpaper .app-wallpaper-layer {
 html.has-wallpaper .app-wallpaper-overlay {
   opacity: 1;
 }
-html.has-wallpaper.dark .app-wallpaper-overlay {
-  background: rgba(0, 0, 0, 0.3);
-}
+html.has-wallpaper.dark .app-wallpaper-overlay { background: var(--app-wallpaper-overlay, rgba(0, 0, 0, 0.3)); }
 
 /* 滚动条 */
 ::-webkit-scrollbar { width: 6px; height: 6px; }

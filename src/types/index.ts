@@ -193,6 +193,17 @@ export interface AppSettings {
   wallpaper?: string
   // 背景图毛玻璃模糊度（0-40px，越大越模糊，默认 20）
   wallpaperBlur?: number
+  // 全局强调色（十六进制颜色）
+  accentColor?: string
+  // 壁纸亮度/可见度（20-100）
+  wallpaperOpacity?: number
+  // 壁纸遮罩强度（0-90）
+  wallpaperOverlay?: number
+  // 内容面板不透明度（35-100）
+  panelOpacity?: number
+  // 壁纸填充方式与对齐位置
+  wallpaperFit?: 'cover' | 'contain'
+  wallpaperPosition?: 'center' | 'top' | 'bottom'
   // 图片生成配置（小说封面生成）。仅支持 OpenAI gpt-image-1 与 Google Imagen
   imageGen?: ImageGenConfig
 }
