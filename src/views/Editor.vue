@@ -44,9 +44,7 @@
       </div>
 
       <div class="topbar-right">
-        <el-select v-model="chatSessionId" size="small" placeholder="对话 ▽" style="width: 130px">
-          <el-option label="默认对话" value="default" />
-        </el-select>
+        <span class="word-count-pill" :title="activeChatSessionId">对话已持久化</span>
         <button class="tb-icon-btn" @click="newConversation" title="新建对话">
           <el-icon><Plus /></el-icon>
         </button>
@@ -493,9 +491,9 @@
     <!-- 顶部功能 - 时光机抽屉 -->
     <el-drawer v-model="historyVisible" title="历史记录" direction="rtl" size="380px">
       <div class="history-list">
-        <div v-for="h in chatHistoryList" :key="h.id" class="history-item" @click="openHistory(h)">
+        <div v-for="h in chatHistoryList" :key="h.id" class="history-item" :class="{ active: h.id === activeChatSessionId }" @click="openHistory(h)">
           <div class="history-title">{{ h.title }}</div>
-          <div class="history-time text-faint text-xs">{{ formatTime(h.time) }}</div>
+          <div class="history-time text-faint text-xs">{{ formatTime(h.time) }} · {{ h.count }} 条</div>
         </div>
         <div v-if="chatHistoryList.length === 0" class="text-faint text-sm" style="padding: 20px; text-align: center">
           暂无历史记录
@@ -516,7 +514,7 @@
         <!-- 搜索框 -->
         <el-input
           v-model="atPickerKeyword"
-          placeholder="搜索章节 / 设定 / 地点…"
+          placeholder="搜索章节 / 设定 / 地点 / 记忆 / 时间线 / 画布…"
           :prefix-icon="Search"
           clearable
           size="default"
@@ -561,7 +559,7 @@
             </div>
           </div>
           <div v-if="atPickerGrouped.length === 0" class="at-picker-empty text-faint">
-            没有可关联的内容，先去创建章节 / 设定 / 地点吧
+            没有可关联的内容，请先创建章节、设定、地点、时间线或画布节点
           </div>
         </div>
       </div>
@@ -597,9 +595,10 @@ import { useProjectStore } from '@/stores/project'
 import { useSettingsStore } from '@/stores/settings'
 import * as db from '@/services/db'
 import * as aiSvc from '@/services/ai'
+import { buildConversationForAI, editorSessionChapterId } from '@/services/conversation'
 import { Skills as SkillsDB } from '@/services/db'
 import { useWebSearch } from '@/composables/useWebSearch'
-import type { Chapter, Prompt, Skill, CanvasNode } from '@/types'
+import type { Chapter, Prompt, Skill, CanvasNode, TimelineEvent, TruthFile } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -620,10 +619,22 @@ const searchVisible = ref(false)
 const headCollapsed = ref(false)
 const searchKeyword = ref('')
 const searchMatches = ref(0)
-const chatSessionId = ref('default')
+const activeChatSessionId = ref('')
 const historyVisible = ref(false)
 
-const chatHistoryList = ref<Array<{ id: string; title: string; time: number }>>([])
+const chatHistoryList = ref<Array<{ id: string; chapterId: string; title: string; time: number; count: number }>>([])
+
+const EDITOR_SESSION_PREFIX = 'editor:'
+function createEditorSessionId(chapterId: string) {
+  return `${EDITOR_SESSION_PREFIX}${chapterId}:${crypto.randomUUID()}`
+}
+function activeEditorSessionKey(pid: string, chapterId: string) {
+  return `trmwrite:editor-session:${pid}:${chapterId}`
+}
+function rememberEditorSession(pid: string, chapterId: string, sessionId: string) {
+  activeChatSessionId.value = sessionId
+  localStorage.setItem(activeEditorSessionKey(pid, chapterId), sessionId)
+}
 
 function goBack() {
   router.push({ name: 'chapters' })
@@ -638,6 +649,9 @@ function goToCanvas() {
 // 链接故事画布：启用后 AI 续写会按工作流节点顺序生成情节
 const canvasLinked = ref(false)
 const canvasWorkflow = ref<CanvasNode[]>([])
+const contextTimeline = ref<TimelineEvent[]>([])
+const contextTruths = ref<TruthFile[]>([])
+const contextCanvasNodes = ref<CanvasNode[]>([])
 const WORKFLOW_TYPES: CanvasNode['type'][] = ['start', 'inciting', 'rising', 'climax', 'resolution']
 
 function orderCanvasNodes(all: CanvasNode[]): CanvasNode[] {
@@ -679,6 +693,7 @@ async function linkCanvas() {
     // 已链接，点击为取消链接
     canvasLinked.value = false
     canvasWorkflow.value = []
+    if (project.value) localStorage.setItem(`trmwrite:editor-canvas:${project.value.id}`, '0')
     ElMessage.info('已取消链接故事画布')
     return
   }
@@ -696,6 +711,7 @@ async function linkCanvas() {
     }
     canvasWorkflow.value = finalWorkflow
     canvasLinked.value = true
+    localStorage.setItem(`trmwrite:editor-canvas:${project.value.id}`, '1')
     ElMessage.success(`已链接故事画布，共 ${finalWorkflow.length} 个节点，AI 续写将按此顺序推进情节`)
   } catch (e: any) {
     ElMessage.error('加载画布失败：' + (e?.message || e))
@@ -737,13 +753,16 @@ function toggleMainContent() {
 }
 
 async function newConversation() {
-  // 清空当前章节的对话历史（内存 + 持久层）
+  // 新建独立会话，不再删除旧对话；旧会话可从“历史记录”恢复。
   const pid = project.value?.id
-  const sid = chapter.value?.id
+  const chapterId = chapter.value?.id
+  if (!pid || !chapterId) return
+  rememberEditorSession(pid, chapterId, createEditorSessionId(chapterId))
   chatMessages.value = []
-  if (pid && sid) {
-    try { await db.Messages.clearSession(pid, sid) } catch (e: any) { console.error('[chat] 清空失败:', e?.message || e) }
-  }
+  linkedItems.value = []
+  pendingSkill.value = null
+  selectedPromptId.value = ''
+  userInput.value = ''
   ElMessage.success('已新建对话')
 }
 
@@ -864,15 +883,21 @@ async function loadChapter(id: string) {
     isLoading.value = true
     if (!project.value) return
     // 并行加载所有数据，避免串行 IPC 往返造成卡顿
-    const [c, all, sk] = await Promise.all([
+    const [c, all, sk, timeline, truths, canvasNodes] = await Promise.all([
       db.Chapters.list(project.value.id),
       db.Prompts.list(project.value.id),
-      SkillsDB.list(project.value.id)
+      SkillsDB.list(project.value.id),
+      db.Timeline.list(project.value.id),
+      db.Truths.list(project.value.id),
+      db.Canvas.list(project.value.id)
     ])
     projectStore.chapters = c.sort((a, b) => a.order - b.order)
     builtinPrompts.value = all.filter(p => p.isBuiltIn)
     projectPrompts.value = all.filter(p => !p.isBuiltIn)
     skills.value = sk
+    contextTimeline.value = timeline
+    contextTruths.value = truths
+    contextCanvasNodes.value = canvasNodes
 
     const target = projectStore.chapters.find(x => x.id === id)
     if (!target) {
@@ -881,6 +906,7 @@ async function loadChapter(id: string) {
     }
     chapter.value = target
     currentChapterId.value = id
+    activeChatSessionId.value = ''
     saveStatus.value = 'idle'
     if (editor.value) {
       // false 表示不触发 onUpdate
@@ -920,56 +946,102 @@ interface EditorChatMessage {
   options?: Array<{ text: string; isCustom?: boolean }>
   selectedOption?: number
   isQuestion?: boolean
+  requestContent?: string
+  linkedItems?: LinkedContextItem[]
+  skillId?: string
+  skillName?: string
+  promptId?: string
+  canvasLinked?: boolean
 }
 const chatMessages = ref<EditorChatMessage[]>([])
 
 // 唯一消息 id 生成器：避免用数组索引作 v-for key 导致 DOM 复用错乱（回答消失）
-let _msgIdSeq = 0
 function genMsgId(): string {
-  _msgIdSeq += 1
-  return `m${Date.now().toString(36)}_${_msgIdSeq}`
+  return `m_${crypto.randomUUID()}`
 }
 /** 追加一条对话消息，自动分配唯一 id 并持久化到 db */
-async function pushMsg(msg: Omit<EditorChatMessage, 'id'>): Promise<void> {
+async function pushMsg(msg: Omit<EditorChatMessage, 'id'>): Promise<EditorChatMessage | null> {
   const id = genMsgId()
-  chatMessages.value.push({ ...msg, id })
-  // 持久化（fire-and-forget，失败不影响对话流）
+  const record = { ...msg, id }
+  chatMessages.value.push(record)
   const pid = project.value?.id
-  const sid = chapter.value?.id
-  if (pid && sid) {
+  const chapterId = chapter.value?.id
+  if (pid && chapterId) {
+    if (!activeChatSessionId.value) {
+      rememberEditorSession(pid, chapterId, createEditorSessionId(chapterId))
+    }
     try {
       await db.Messages.save({
       id,
       projectId: pid,
-      sessionId: sid,
+      sessionId: activeChatSessionId.value,
       role: msg.role,
       content: msg.content,
       options: msg.options,
       selectedOption: msg.selectedOption,
       isQuestion: msg.isQuestion,
+      requestContent: msg.requestContent,
+      linkedItems: msg.linkedItems,
+      skillId: msg.skillId,
+      skillName: msg.skillName,
+      promptId: msg.promptId,
+      canvasLinked: msg.canvasLinked,
         createdAt: Date.now()
       })
+      return record
     } catch (e: any) {
+      chatMessages.value = chatMessages.value.filter(item => item.id !== id)
       console.error('[chat] 保存消息失败:', e?.message || e)
       ElMessage.error('对话消息保存失败')
+      return null
     }
   }
+  return null
 }
 /** 加载当前章节的对话历史 */
 async function loadChatHistory() {
   const pid = project.value?.id
-  const sid = chapter.value?.id
-  if (!pid || !sid) { chatMessages.value = []; return }
+  const chapterId = chapter.value?.id
+  if (!pid || !chapterId) { chatMessages.value = []; return }
   try {
-    const records = await db.Messages.listBySession(pid, sid)
+    const all = await db.Messages.list(pid)
+    const candidates = Array.from(new Set(all
+      .filter(item => editorSessionChapterId(item.sessionId) === chapterId)
+      .map(item => item.sessionId)))
+    const remembered = localStorage.getItem(activeEditorSessionKey(pid, chapterId)) || ''
+    const newest = candidates.sort((a, b) => {
+      const aTime = Math.max(0, ...all.filter(item => item.sessionId === a).map(item => item.createdAt || 0))
+      const bTime = Math.max(0, ...all.filter(item => item.sessionId === b).map(item => item.createdAt || 0))
+      return bTime - aTime
+    })[0]
+    const sessionId = candidates.includes(remembered) ? remembered : (newest || createEditorSessionId(chapterId))
+    rememberEditorSession(pid, chapterId, sessionId)
+    const records = all
+      .filter(item => item.sessionId === sessionId)
+      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
     chatMessages.value = records.map(r => ({
       id: r.id,
       role: r.role,
       content: r.content,
       options: r.options,
       selectedOption: r.selectedOption,
-      isQuestion: r.isQuestion
+      isQuestion: r.isQuestion,
+      requestContent: r.requestContent,
+      linkedItems: r.linkedItems,
+      skillId: r.skillId,
+      skillName: r.skillName,
+      promptId: r.promptId,
+      canvasLinked: r.canvasLinked
     }))
+    // 恢复最近一次发送时真实使用的上下文，而不是只恢复界面上的 @ 标签。
+    const lastUser = [...chatMessages.value].reverse().find(message => message.role === 'user')
+    linkedItems.value = lastUser?.linkedItems?.map(item => ({ ...item })) || []
+    pendingSkill.value = lastUser?.skillId ? (skills.value.find(item => item.id === lastUser.skillId) || null) : null
+    selectedPromptId.value = lastUser?.promptId || ''
+    if (lastUser?.canvasLinked) {
+      canvasWorkflow.value = orderCanvasNodes(contextCanvasNodes.value)
+      canvasLinked.value = canvasWorkflow.value.length > 0
+    }
   } catch (e: any) {
     console.error('[chat] 加载历史失败:', e?.message || e)
     chatMessages.value = []
@@ -980,23 +1052,44 @@ async function loadChatHistoryList() {
   const pid = project.value?.id
   if (!pid) { chatHistoryList.value = []; return }
   try {
-    const chapterIds = new Set(projectStore.chapters.map(chapter => chapter.id))
-    const sessions = (await db.Messages.listSessions(pid)).filter(session => chapterIds.has(session.sessionId))
-    chatHistoryList.value = sessions.map(s => {
-      // sessionId 即 chapterId，映射成"第X章 · 标题"
-      const ch = projectStore.chapters.find(c => c.id === s.sessionId)
-      const title = ch ? `第${ch.order}章 · ${ch.title}` : '对话'
-      return { id: s.sessionId, title, time: s.lastTime }
-    })
+    const all = await db.Messages.list(pid)
+    const chapterIds = new Set(projectStore.chapters.map(item => item.id))
+    const groups = new Map<string, typeof all>()
+    for (const message of all) {
+      const chapterId = editorSessionChapterId(message.sessionId)
+      if (!chapterIds.has(chapterId)) continue
+      const list = groups.get(message.sessionId) || []
+      list.push(message)
+      groups.set(message.sessionId, list)
+    }
+    chatHistoryList.value = Array.from(groups.entries()).map(([id, records]) => {
+      records.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+      const chapterId = editorSessionChapterId(id)
+      const ch = projectStore.chapters.find(item => item.id === chapterId)
+      const firstUser = records.find(item => item.role === 'user')
+      const detail = (firstUser?.content || '新对话').replace(/\s+/g, ' ').slice(0, 22)
+      return {
+        id,
+        chapterId,
+        title: ch ? `第${ch.order}章 · ${detail}` : detail,
+        time: Math.max(...records.map(item => item.createdAt || 0)),
+        count: records.length
+      }
+    }).sort((a, b) => b.time - a.time)
   } catch (e: any) {
     console.error('[chat] 加载历史列表失败:', e?.message || e)
     chatHistoryList.value = []
   }
 }
 /** 点击历史项跳转到对应章节 */
-function openHistory(h: { id: string }) {
-  if (h.id && route.params.chapterId !== h.id) {
-    router.push({ name: 'editor', params: { id: route.params.id as string, chapterId: h.id } })
+async function openHistory(h: { id: string; chapterId: string }) {
+  const pid = project.value?.id
+  if (!pid) return
+  rememberEditorSession(pid, h.chapterId, h.id)
+  if (route.params.chapterId !== h.chapterId) {
+    await router.push({ name: 'editor', params: { id: route.params.id as string, chapterId: h.chapterId } })
+  } else {
+    await loadChatHistory()
   }
   historyVisible.value = false
 }
@@ -1032,16 +1125,26 @@ function setAskMode(mode: 'auto' | 'always' | 'never') {
   ElMessage.success(tip)
 }
 
-// 关联片段
-const linkedItems = ref<Array<{ label: string; content: string }>>([])
+// 关联片段：保存来源标识与正文快照，消息落盘后可跨重启恢复。
+interface LinkedContextItem {
+  sourceId?: string
+  type?: string
+  label: string
+  content: string
+  updatedAt?: number
+}
+const linkedItems = ref<LinkedContextItem[]>([])
 const linkedWordsCount = computed(() => linkedItems.value.reduce((s, i) => s + i.content.length, 0))
 
 function linkCurrentChapter() {
   if (!chapter.value) return
   const text = editor.value?.getText() || ''
   linkedItems.value.push({
+    sourceId: chapter.value.id,
+    type: '章节',
     label: `第${chapter.value.order}章`,
-    content: text
+    content: text,
+    updatedAt: chapter.value.updatedAt
   })
   ElMessage.success('已关联当前章节')
 }
@@ -1062,6 +1165,7 @@ async function uploadAttachment() {
     const truncated = text.length > 8000 ? text.slice(0, 8000) + '\n...(内容过长已截断)' : text
     const fileName = filePath.split(/[\\/]/).pop() || '附件'
     linkedItems.value.push({
+      type: '附件',
       label: fileName,
       content: truncated
     })
@@ -1082,10 +1186,12 @@ const slashKeyword = ref('')
 
 // @ 关联菜单
 interface AtMatch {
+  sourceId?: string
   type: string       // 地点/设定/章节
   label: string      // 显示名
   preview: string    // 描述前 60 字
   content: string    // 完整内容（关联时塞入）
+  updatedAt?: number
   icon: any          // Element Plus 图标
 }
 const atMenuVisible = ref(false)
@@ -1127,36 +1233,80 @@ function buildAtMatches(keyword: string): AtMatch[] {
   for (const l of projectStore.locations) {
     if (!filter(l.name)) continue
     matches.push({
+      sourceId: l.id,
       type: '地点',
       label: l.name,
       preview: `${l.type} · ${(l.description || '无描述').slice(0, 50)}`,
       content: `【地点：${l.name}】\n类型：${l.type}\n描述：${l.description || '无'}\n特征：${l.features || '无'}\n文化：${l.culture || '无'}`,
-      icon: LocationIcon
+      icon: LocationIcon,
+      updatedAt: l.updatedAt
     })
   }
   // 设定
   for (const l of projectStore.lore) {
     if (!filter(l.title)) continue
     matches.push({
+      sourceId: l.id,
       type: '设定',
       label: l.title,
       preview: `${l.category} · ${(l.content || '无内容').slice(0, 50)}`,
       content: `【设定：${l.title}】\n分类：${l.category}\n内容：${l.content || '无'}`,
-      icon: Collection
+      icon: Collection,
+      updatedAt: l.updatedAt
     })
   }
   // 章节
   for (const c of projectStore.chapters) {
     if (!filter(c.title)) continue
     matches.push({
+      sourceId: c.id,
       type: '章节',
       label: `第${c.order}章 ${c.title}`,
       preview: `${c.status} · ${(c.summary || c.content || '').replace(/<[^>]+>/g, '').slice(0, 50)}`,
       content: `【第${c.order}章《${c.title}》】\n${(c.content || '').replace(/<[^>]+>/g, '\n').slice(0, 3000)}`,
-      icon: Document
+      icon: Document,
+      updatedAt: c.updatedAt
     })
   }
-  return matches.slice(0, 20)
+  // 长期记忆 / 真相文件
+  for (const item of contextTruths.value) {
+    if (!filter(item.title)) continue
+    matches.push({
+      sourceId: item.id,
+      type: '记忆',
+      label: item.title,
+      preview: (item.content || '无内容').slice(0, 55),
+      content: `【长期记忆：${item.title}】\n${item.content || '无'}`,
+      icon: Files,
+      updatedAt: item.updatedAt
+    })
+  }
+  // 时间线
+  for (const item of contextTimeline.value) {
+    if (!filter(item.title) && !filter(item.time || '')) continue
+    matches.push({
+      sourceId: item.id,
+      type: '时间线',
+      label: `${item.time || '未定时间'} · ${item.title}`,
+      preview: (item.description || '无描述').slice(0, 55),
+      content: `【时间线：${item.time || '未定时间'} · ${item.title}】\n${item.description || '无'}`,
+      icon: Timer
+    })
+  }
+  // 故事画布节点
+  for (const item of contextCanvasNodes.value) {
+    if (!filter(item.title || '') && !filter(item.content || '')) continue
+    matches.push({
+      sourceId: item.id,
+      type: '画布',
+      label: item.title || '未命名画布节点',
+      preview: (item.content || item.aiPrompt || '无内容').slice(0, 55),
+      content: `【画布节点：${item.title || '未命名'}】\n${item.content || '无'}${item.aiPrompt ? `\n写作提示：${item.aiPrompt}` : ''}`,
+      icon: Connection,
+      updatedAt: item.createdAt
+    })
+  }
+  return matches
 }
 
 function pickAtMatch(m: AtMatch) {
@@ -1171,7 +1321,8 @@ function pickAtMatch(m: AtMatch) {
   const newText = before.slice(0, atIdx) + `@${m.label} ` + after
   userInput.value = newText
   // 塞入关联内容
-  linkedItems.value.push({ label: m.label, content: m.content })
+  const exists = linkedItems.value.some(item => item.type === m.type && item.sourceId === m.sourceId && item.label === m.label)
+  if (!exists) linkedItems.value.push({ sourceId: m.sourceId, type: m.type, label: m.label, content: m.content, updatedAt: m.updatedAt })
   atMenuVisible.value = false
   ElMessage.success(`已关联${m.type}：${m.label}`)
   nextTick(() => inputRef.value?.focus())
@@ -1231,7 +1382,7 @@ const atPickerGrouped = computed(() => {
     groups[m.type].push(m)
   }
   // 固定顺序：章节 → 设定 → 地点 → 其它
-  const order = ['章节', '设定', '地点']
+  const order = ['章节', '设定', '地点', '记忆', '时间线', '画布']
   const types = Object.keys(groups).sort((a, b) => {
     const ia = order.indexOf(a), ib = order.indexOf(b)
     if (ia >= 0 && ib >= 0) return ia - ib
@@ -1292,7 +1443,7 @@ function confirmAtPicker() {
   const existing = new Set(linkedItems.value.map(it => it.label))
   for (const m of selectedMatches) {
     if (!existing.has(m.label)) {
-      linkedItems.value.push({ label: m.label, content: m.content })
+      linkedItems.value.push({ sourceId: m.sourceId, type: m.type, label: m.label, content: m.content, updatedAt: m.updatedAt })
     }
   }
   // 清理输入框中残留的 @xxx 片段
@@ -1380,7 +1531,13 @@ function getProvider() {
 
 async function sendChat() {
   if (!canSend.value || !project.value) return
-  const provider = getProvider()
+  const activeSkill = pendingSkill.value
+  const activePromptId = selectedPromptId.value
+  const preferredSkillModel = activeSkill?.recommendedModel?.trim() || ''
+  const requestModel = preferredSkillModel && settings.findProviderForModel(preferredSkillModel)
+    ? preferredSkillModel
+    : (aiModel.value || project.value.settings.model)
+  const provider = settings.findProviderForModel(requestModel)
   if (!provider?.apiKey) {
     ElMessage.warning('请先在设置中配置 API Key')
     return
@@ -1389,19 +1546,17 @@ async function sendChat() {
   const rawUserMsg = userInput.value.trim()
   const userMsg = stripLinkedMentions(rawUserMsg)
   // 如果选了技能但没输入，也算有效（直接用技能模板）
-  if (!rawUserMsg && linkedItems.value.length === 0 && !pendingSkill.value && !selectedPromptId.value) return
+  if (!rawUserMsg && linkedItems.value.length === 0 && !activeSkill && !activePromptId) return
 
   // 显示给用户的消息：技能 chip + 补充说明
   const linkedLabels = linkedItems.value.map(i => `@${i.label}`).join(' ')
-  const displayMsg = pendingSkill.value
-    ? `[技能：${pendingSkill.value.name}]${userMsg ? '\n' + userMsg : ''}${linkedLabels ? '\n' + linkedLabels : ''}`
+  const displayMsg = activeSkill
+    ? `[技能：${activeSkill.name}]${userMsg ? '\n' + userMsg : ''}${linkedLabels ? '\n' + linkedLabels : ''}`
     : (userMsg || linkedLabels)
   generating.value = true
   aiStreamingText.value = ''
   stopFlag.value = false
   currentStreamCancel = null
-  await pushMsg({ role: 'user', content: displayMsg })
-  userInput.value = ''
   slashMenuVisible.value = false
 
   // 构造 system + user
@@ -1432,6 +1587,12 @@ async function sendChat() {
     : ''
   // 用户要求：@ 关联存在时，不发送章节正文，只发 @ 关联文件内容
   const hasLinked = !!linkedContent
+  let searchCtx = ''
+  const skillNeedsSearch = !!activeSkill?.variables?.includes('searchResults')
+  if (webSearchEnabled.value || skillNeedsSearch) {
+    const query = userMsg || activeSkill?.name || project.value.title
+    searchCtx = await searchAndBuildContext(query, 6)
+  }
   const fillVars = (extra: Record<string, string> = {}): Record<string, string> => ({
     // 有 @ 关联时 content 留空，避免把正文一起带过去
     content: hasLinked ? '' : (selText || fullText.slice(-2000)),
@@ -1446,33 +1607,44 @@ async function sendChat() {
     scene: userMsg,
     emotion: '',
     imitationGuide: project.value?.settings.styleSample || '',
-    searchResults: '',
+    searchResults: searchCtx,
     excerpt: hasLinked ? '' : fullText.slice(0, 3000),
     topic: userMsg,
     ...extra
   })
 
-  if (pendingSkill.value) {
+  if (activeSkill) {
     // 使用技能的 system + user 模板，自动填充变量
-    sysContent = pendingSkill.value.systemPrompt || sysContent
+    const fallback = linkedContent || userMsg || ctx
     const vars = fillVars()
-    userContent = aiSvc.renderTemplate(pendingSkill.value.userPrompt, vars)
+    const requiredVariables = new Set([
+      ...(activeSkill.variables || []),
+      ...aiSvc.extractVariables(activeSkill.systemPrompt || ''),
+      ...aiSvc.extractVariables(activeSkill.userPrompt || '')
+    ])
+    for (const variable of requiredVariables) {
+      if (!vars[variable]) vars[variable] = fallback
+    }
+    sysContent = activeSkill.systemPrompt ? aiSvc.renderTemplate(activeSkill.systemPrompt, vars) : sysContent
+    userContent = aiSvc.renderTemplate(activeSkill.userPrompt, vars)
     // 如果用户有补充输入且模板中没占位符接收，追加到末尾
-    if (userMsg && !pendingSkill.value.userPrompt.includes('{{')) {
+    if (userMsg && !activeSkill.userPrompt.includes('{{')) {
       userContent = userMsg
-    } else if (userMsg && pendingSkill.value.variables && !pendingSkill.value.variables.some(v => ['instruction', 'scene', 'emotion', 'topic'].includes(v))) {
+    } else if (userMsg && activeSkill.variables && !activeSkill.variables.some(v => ['instruction', 'scene', 'emotion', 'topic'].includes(v))) {
       userContent += `\n\n【用户补充说明】${userMsg}`
     }
     // 注入 @ 关联内容（技能分支此前丢失，这里补齐）
     if (linkedContent) {
       userContent += `\n\n【@ 关联内容】\n${linkedContent}`
     }
-    pendingSkill.value = null
-  } else if (selectedPromptId.value) {
+  } else if (activePromptId) {
     const all = [...builtinPrompts.value, ...projectPrompts.value]
-    const tpl = all.find(p => p.id === selectedPromptId.value)
+    const tpl = all.find(p => p.id === activePromptId)
     if (tpl) {
       const vars = fillVars()
+      for (const variable of aiSvc.extractVariables(tpl.content)) {
+        if (!vars[variable]) vars[variable] = linkedContent || userMsg || ctx
+      }
       userContent = aiSvc.renderTemplate(tpl.content, vars)
     }
     // 注入 @ 关联内容（提示词分支此前丢失，这里补齐）
@@ -1495,27 +1667,42 @@ async function sendChat() {
     sysContent += '\n\n' + canvasCtx
   }
 
-  // 联网搜索：开启时先上网搜索，把结果注入 system prompt
-  if (webSearchEnabled.value) {
-    const searchCtx = await searchAndBuildContext(userMsg, 6)
-    if (searchCtx) {
-      sysContent += '\n\n' + searchCtx
-    }
+  if (searchCtx) sysContent += '\n\n' + searchCtx
+
+  const priorConversation = buildConversationForAI(chatMessages.value)
+  const contextSnapshot = linkedItems.value.map(item => ({ ...item }))
+  const savedUser = await pushMsg({
+    role: 'user',
+    content: displayMsg,
+    requestContent: userContent,
+    linkedItems: contextSnapshot,
+    skillId: activeSkill?.id,
+    skillName: activeSkill?.name,
+    promptId: activePromptId || undefined,
+    canvasLinked: canvasLinked.value
+  })
+  if (!savedUser) {
+    generating.value = false
+    aiStreamingText.value = ''
+    return
   }
+  userInput.value = ''
+  pendingSkill.value = null
+  selectedPromptId.value = ''
 
   try {
     const ret = window.api.ai.stream(
       aiSvc.buildRequest({
         baseUrl: provider.baseUrl,
         apiKey: provider.apiKey,
-        model: aiModel.value || project.value.settings.model,
+        model: requestModel,
         messages: [
           { role: 'system', content: sysContent },
-          ...chatMessages.value.slice(0, -1).slice(-6).map(m => ({ role: m.role as any, content: m.content })),
+          ...priorConversation,
           { role: 'user', content: userContent }
         ],
-        temperature: 0.8,
-        maxTokens: 4096
+        temperature: activeSkill?.temperature ?? 0.8,
+        maxTokens: activeSkill?.maxTokens ?? 4096
       }),
       (chunk) => {
         if (stopFlag.value) return
@@ -1680,17 +1867,24 @@ async function answerQuestion(msg: EditorChatMessage, idx: number) {
 
 async function persistChatMessage(msg: EditorChatMessage) {
   const pid = project.value?.id
-  const sid = chapter.value?.id
-  if (!pid || !sid) return
+  const chapterId = chapter.value?.id
+  if (!pid || !chapterId) return
+  if (!activeChatSessionId.value) rememberEditorSession(pid, chapterId, createEditorSessionId(chapterId))
   await db.Messages.save({
     id: msg.id,
     projectId: pid,
-    sessionId: sid,
+    sessionId: activeChatSessionId.value,
     role: msg.role,
     content: msg.content,
     options: msg.options,
     selectedOption: msg.selectedOption,
-    isQuestion: msg.isQuestion
+    isQuestion: msg.isQuestion,
+    requestContent: msg.requestContent,
+    linkedItems: msg.linkedItems,
+    skillId: msg.skillId,
+    skillName: msg.skillName,
+    promptId: msg.promptId,
+    canvasLinked: msg.canvasLinked
   })
 }
 
@@ -1709,22 +1903,11 @@ async function continueAfterAnswer() {
     : askMode.value === 'auto'
       ? '\n\n【交互规则】默认直接续写正文，只在卡壳信号出现时才提问（剧情多走向、设定矛盾、关键信息缺失、重大转折点）。'
       : '\n\n【交互规则】直接续写正文，不要提问，不要输出 ===QUESTION=== 块。'
-  const sysContent = `你是一位资深小说家，擅长${project.value.genre}类型创作。文风自然流畅，避免AI味。${project.value.settings.styleSample ? '\n参考文风：' + project.value.settings.styleSample : ''}${askModePrompt}`
+  let sysContent = `你是一位资深小说家，擅长${project.value.genre}类型创作。文风自然流畅，避免AI味。${project.value.settings.styleSample ? '\n参考文风：' + project.value.settings.styleSample : ''}${askModePrompt}`
   const ctx = buildContext()
-  const recent = chatMessages.value
-    .filter(m => !m.isQuestion || m.selectedOption !== undefined)
-    .slice(-6)
-    .map(m => {
-      if (m.isQuestion && m.selectedOption !== undefined && m.options) {
-        const opt = m.options[m.selectedOption]
-        return { role: 'assistant' as const, content: `[提问]${m.content}\n[用户选择]${String.fromCharCode(65 + m.selectedOption)}. ${opt.text}` }
-      }
-      return { role: m.role as 'user' | 'assistant', content: m.content }
-    })
-  // 取最后一条 user 消息
-  const lastUser = chatMessages.value.filter(m => m.role === 'user').slice(-1)[0]
-  if (!lastUser) return
-  const userContent = `${lastUser.content}\n\n【当前上下文】\n${ctx}`
+  sysContent += `\n\n【当前小说上下文】\n${ctx}`
+  const recent = buildConversationForAI(chatMessages.value.filter(m => !m.isQuestion || m.selectedOption !== undefined))
+  if (!recent.some(item => item.role === 'user')) return
 
   generating.value = true
   aiStreamingText.value = ''
@@ -1737,8 +1920,7 @@ async function continueAfterAnswer() {
         model: aiModel.value || project.value.settings.model,
         messages: [
           { role: 'system', content: sysContent },
-          ...recent,
-          { role: 'user', content: userContent }
+          ...recent
         ],
         temperature: 0.8,
         maxTokens: 4096
@@ -1789,7 +1971,14 @@ async function askAiToQuestion(msg: EditorChatMessage) {
   const sysContent = `你是一位资深小说家。用户希望你在当前剧情节点给出 ABCD 四个走向选项让用户选择。严格按以下格式输出，不要其他文字：\n===QUESTION===\n问题：<基于当前剧情提出一个关键走向问题>\nA. <选项一>\nB. <选项二>\nC. <选项三>\nD. 自定义\n===END===`
   const userContent = `【当前上下文】\n${ctx}\n\n上一段 AI 输出：\n${msg.content?.slice(-500) || '（无）'}\n\n请给出 ABCD 选项。`
   // 先 push 一条提示
-  await pushMsg({ role: 'user', content: '[让 AI 提问] 请基于当前剧情给出 ABCD 选项' })
+  const saved = await pushMsg({
+    role: 'user',
+    content: '[让 AI 提问] 请基于当前剧情给出 ABCD 选项',
+    requestContent: userContent,
+    linkedItems: linkedItems.value.map(item => ({ ...item })),
+    canvasLinked: canvasLinked.value
+  })
+  if (!saved) return
   generating.value = true
   aiStreamingText.value = ''
   stopFlag.value = false
@@ -1900,6 +2089,9 @@ async function regenerateMsg(index: number) {
     return
   }
   const userMsg = chatMessages.value[userIdx]
+  linkedItems.value = userMsg.linkedItems?.map(item => ({ ...item })) || []
+  pendingSkill.value = userMsg.skillId ? (skills.value.find(item => item.id === userMsg.skillId) || null) : null
+  selectedPromptId.value = userMsg.promptId || ''
   // 提取原始指令文本（去掉技能前缀）
   let rawInput = userMsg.content || ''
   const skillMatch = rawInput.match(/^\[技能：[^\]]+\]\s*\n?([\s\S]*)$/)
@@ -2068,6 +2260,10 @@ onMounted(async () => {
       await projectStore.loadProject(route.params.id as string)
     }
     await loadChapter(currentChapterId.value)
+    if (project.value && localStorage.getItem(`trmwrite:editor-canvas:${project.value.id}`) === '1') {
+      canvasWorkflow.value = orderCanvasNodes(contextCanvasNodes.value)
+      canvasLinked.value = canvasWorkflow.value.length > 0
+    }
     startAutoSave()
     if (!aiModel.value && models.value.length > 0) {
       aiModel.value = project.value?.settings.model || settings.defaultModel() || models.value[0].model

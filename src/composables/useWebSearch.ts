@@ -5,7 +5,7 @@ import { useSettingsStore } from '@/stores/settings'
  * 联网搜索 composable
  * 类似 DeepSeek / 元宝 / kimi / ima / glm 的联网搜索开关：
  * - 对话框里点一下开启，AI 回答前先上网搜索，把结果注入上下文
- * - 开关状态按 scopeKey 持久化到 sessionStorage（刷新不丢失，按页面/项目隔离）
+ * - 开关状态按 scopeKey 持久化到 localStorage（软件重启后仍保留，按页面/项目隔离）
  * - 默认 DuckDuckGo（无需 API Key），可在设置中切换 Tavily / Serper
  */
 
@@ -21,7 +21,7 @@ export function useWebSearch(scopeKey: string) {
   const storageKey = `trmwrite:websearch:${scopeKey}`
 
   // 开关状态：从 sessionStorage 读取，默认关闭
-  const webSearchEnabled = ref(sessionStorage.getItem(storageKey) === '1')
+  const webSearchEnabled = ref(localStorage.getItem(storageKey) === '1')
   // 搜索中状态
   const searching = ref(false)
   // 最近一次搜索结果（供 UI 显示来源引用）
@@ -29,7 +29,7 @@ export function useWebSearch(scopeKey: string) {
 
   function toggleWebSearch() {
     webSearchEnabled.value = !webSearchEnabled.value
-    sessionStorage.setItem(storageKey, webSearchEnabled.value ? '1' : '0')
+    localStorage.setItem(storageKey, webSearchEnabled.value ? '1' : '0')
     if (!webSearchEnabled.value) lastResults.value = []
   }
 

@@ -135,15 +135,40 @@ export function registerStoreIPC() {
   ipcMain.handle('store:collection:save', async (_e, collection: string, doc: any) => {
     if (!COLLECTIONS.includes(collection) && collection !== 'projects') return null
     if (!doc || typeof doc !== 'object' || Array.isArray(doc)) throw new Error('保存数据格式无效')
+    if (collection === 'messages') {
+      if (typeof doc.projectId !== 'string' || !doc.projectId || typeof doc.sessionId !== 'string' || !doc.sessionId) {
+        throw new Error('对话所属项目或会话无效')
+      }
+      if (!['user', 'assistant'].includes(doc.role) || typeof doc.content !== 'string') {
+        throw new Error('对话消息格式无效')
+      }
+      if (doc.content.length > 2_000_000 || (doc.requestContent && String(doc.requestContent).length > 2_000_000)) {
+        throw new Error('单条对话消息过大')
+      }
+      if (doc.linkedItems !== undefined) {
+        if (!Array.isArray(doc.linkedItems) || doc.linkedItems.length > 100) throw new Error('关联上下文格式无效')
+        doc.linkedItems = doc.linkedItems.map((item: any) => ({
+          sourceId: typeof item?.sourceId === 'string' ? item.sourceId.slice(0, 200) : undefined,
+          type: typeof item?.type === 'string' ? item.type.slice(0, 50) : undefined,
+          label: String(item?.label || '').slice(0, 300),
+          content: String(item?.content || '').slice(0, 100_000),
+          updatedAt: Number.isFinite(item?.updatedAt) ? item.updatedAt : undefined
+        }))
+      }
+    }
     const db = getDB()
     const arr = (db.data as any)[collection] as any[]
     if (!arr) return null
     doc.updatedAt = Date.now()
-    if (!doc.createdAt) doc.createdAt = Date.now()
     if (!doc.id) doc.id = uuidv4()
     const idx = arr.findIndex(x => x.id === doc.id)
-    if (idx >= 0) arr[idx] = { ...arr[idx], ...doc }
-    else arr.push(doc)
+    if (idx >= 0) {
+      doc.createdAt = arr[idx].createdAt || doc.createdAt || Date.now()
+      arr[idx] = { ...arr[idx], ...doc }
+    } else {
+      if (!doc.createdAt) doc.createdAt = Date.now()
+      arr.push(doc)
+    }
     await writeDB()
     return doc
   })

@@ -58,6 +58,9 @@
           <el-icon><Link /></el-icon><span>{{ canvasLinked ? `已链接画布（${canvasNodes.length}）` : '链接故事画布' }}</span>
         </button>
         <button v-if="canvasLinked" class="context-btn icon-only" title="刷新画布内容" @click="loadCanvasContext(true)"><el-icon><RefreshRight /></el-icon></button>
+        <button class="context-btn" :class="{ active: novelLinked }" :title="novelLinked ? '发送时自动读取最新章节、设定、地点、时间线与长期记忆' : '让设定对话参考整部小说'" @click="toggleNovelLink">
+          <el-icon><Document /></el-icon><span>{{ novelLinked ? '已链接小说上下文' : '链接小说文本' }}</span>
+        </button>
         <button class="context-btn" :class="{ active: webSearchEnabled }" :title="webSearchEnabled ? '联网搜索已开启（点击关闭）' : '开启联网搜索，AI 回答前先上网搜索'" @click="toggleWebSearch">
           <el-icon><Cloudy /></el-icon><span>{{ webSearchEnabled ? '联网搜索已开启' : '联网搜索' }}</span>
         </button>
@@ -87,7 +90,7 @@
 import { ref, computed, nextTick, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ChatDotRound, Delete, DocumentCopy, Promotion, VideoPause, Loading, Cloudy, Clock, Plus, Link, RefreshRight } from '@element-plus/icons-vue'
+import { ChatDotRound, Delete, DocumentCopy, Promotion, VideoPause, Loading, Cloudy, Clock, Plus, Link, RefreshRight, Document } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { useSettingsStore } from '@/stores/settings'
 import { useWebSearch } from '@/composables/useWebSearch'
@@ -117,6 +120,7 @@ const generating = ref(false)
 const stopFlag = ref(false)
 const saveState = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
 const canvasLinked = ref(false)
+const novelLinked = ref(false)
 const canvasNodes = ref<CanvasNode[]>([])
 let currentStreamCancel: (() => void) | null = null
 const aiModel = ref('')
@@ -125,19 +129,19 @@ const chatBodyRef = ref<HTMLDivElement | null>(null)
 const saveStateText = computed(() => ({ idle: '', saving: '正在保存…', saved: '已自动保存', error: '保存失败' }[saveState.value]))
 const canSend = computed(() => userInput.value.trim().length > 0 && !generating.value)
 
-let _msgIdSeq = 0
-function genMsgId() { _msgIdSeq += 1; return `c${Date.now().toString(36)}_${_msgIdSeq}` }
-function createSessionId() { return `${SETTINGS_SESSION_PREFIX}${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}` }
+function genMsgId() { return `c_${crypto.randomUUID()}` }
+function createSessionId() { return `${SETTINGS_SESSION_PREFIX}${crypto.randomUUID()}` }
 function activeSessionKey(pid: string) { return `trmwrite:settings-session:${pid}` }
 function canvasLinkKey(pid: string) { return `trmwrite:settings-canvas-linked:${pid}` }
+function novelLinkKey(pid: string) { return `trmwrite:settings-novel-linked:${pid}` }
 function rememberActiveSession() {
   const pid = project.value?.id
   if (pid && activeSessionId.value) localStorage.setItem(activeSessionKey(pid), activeSessionId.value)
 }
 
-async function pushMsg(msg: Omit<ChatMsg, 'id'>) {
+async function pushMsg(msg: Omit<ChatMsg, 'id'>): Promise<boolean> {
   const pid = project.value?.id
-  if (!pid) return
+  if (!pid) return false
   if (!activeSessionId.value) activeSessionId.value = createSessionId()
   rememberActiveSession()
   const record = { ...msg, id: genMsgId() }
@@ -147,11 +151,28 @@ async function pushMsg(msg: Omit<ChatMsg, 'id'>) {
     await db.Messages.save({ ...record, projectId: pid, sessionId: activeSessionId.value, createdAt: Date.now() })
     saveState.value = 'saved'
     await refreshHistorySessions()
+    return true
   } catch (e: any) {
+    messages.value = messages.value.filter(item => item.id !== record.id)
     saveState.value = 'error'
     console.error('[chat-settings] 保存消息失败:', e?.message || e)
     ElMessage.error('消息保存失败，请检查本地存储')
+    return false
   }
+}
+
+function recentConversationForAI(limitChars = 80_000) {
+  const selected: Array<{ role: 'user' | 'assistant'; content: string }> = []
+  let total = 0
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    const message = messages.value[i]
+    const size = message.content.length
+    if (selected.length > 0 && total + size > limitChars) break
+    selected.push({ role: message.role, content: message.content })
+    total += size
+    if (selected.length >= 30) break
+  }
+  return selected.reverse()
 }
 
 async function refreshHistorySessions() {
@@ -292,6 +313,31 @@ async function toggleCanvasLink() {
   localStorage.setItem(canvasLinkKey(pid), canvasLinked.value ? '1' : '0')
   if (canvasLinked.value) { await loadCanvasContext(); ElMessage.success(`已链接故事画布，共 ${canvasNodes.value.length} 个节点`) }
 }
+
+function toggleNovelLink() {
+  const pid = project.value?.id
+  if (!pid) return
+  novelLinked.value = !novelLinked.value
+  localStorage.setItem(novelLinkKey(pid), novelLinked.value ? '1' : '0')
+  ElMessage.success(novelLinked.value ? '已链接整部小说上下文，发送时会读取最新资料' : '已取消小说上下文链接')
+}
+
+async function buildNovelContext(): Promise<string> {
+  const pid = project.value?.id
+  if (!pid || !novelLinked.value) return ''
+  const [chapters, lore, locations, timeline, truths] = await Promise.all([
+    db.Chapters.list(pid), db.Lore.list(pid), db.Locations.list(pid), db.Timeline.list(pid), db.Truths.list(pid)
+  ])
+  const stripHtml = (value: string) => value.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  const chapterText = chapters.sort((a, b) => a.order - b.order).map(item =>
+    `第${item.order}章《${item.title}》\n摘要：${item.summary || '无'}\n正文摘录：${stripHtml(item.content || '').slice(-1200)}`
+  ).join('\n\n')
+  const loreText = lore.map(item => `${item.category}/${item.title}：${item.content}`).join('\n')
+  const locationText = locations.map(item => `${item.name}（${item.type}）：${item.description}；特征：${item.features}`).join('\n')
+  const timelineText = timeline.map(item => `${item.time} · ${item.title}：${item.description}`).join('\n')
+  const truthText = truths.map(item => `${item.title}：${item.content}`).join('\n')
+  return `【已链接的小说上下文】\n以下内容来自当前项目的持久化资料，请在回答时保持人物、设定、时间线和已发生情节一致。\n\n【章节】\n${chapterText}\n\n【世界观】\n${loreText}\n\n【地点】\n${locationText}\n\n【时间线】\n${timelineText}\n\n【长期记忆】\n${truthText}`.slice(0, 60_000)
+}
 function buildCanvasContext() {
   if (!canvasLinked.value || canvasNodes.value.length === 0) return ''
   const labels: Record<CanvasNode['type'], string> = { start: '起点', inciting: '触发事件', rising: '发展', climax: '高潮', resolution: '结局', scene: '场景', plot: '剧情', character: '角色', theme: '主题', note: '笔记' }
@@ -307,7 +353,8 @@ async function sendChat() {
   const provider = getProvider()
   if (!provider?.apiKey) { ElMessage.warning('请先在设置中配置 API Key'); return }
   const content = userInput.value.trim()
-  await pushMsg({ role: 'user', content })
+  const saved = await pushMsg({ role: 'user', content })
+  if (!saved) return
   userInput.value = ''
   generating.value = true
   aiStreamingText.value = ''
@@ -321,11 +368,13 @@ async function sendChat() {
 类型：${project.value.genre || '未指定'}
 简介：${project.value.description || '（无）'}`
   try {
+    const novelCtx = await buildNovelContext()
+    if (novelCtx) finalSysContent += '\n\n' + novelCtx
     if (canvasLinked.value) { await loadCanvasContext(); const ctx = buildCanvasContext(); if (ctx) finalSysContent += '\n\n' + ctx }
     if (webSearchEnabled.value) { const searchCtx = await searchAndBuildContext(content, 6); if (searchCtx) finalSysContent += '\n\n' + searchCtx }
     const ret = window.api.ai.stream(aiSvc.buildRequest({
       baseUrl: provider.baseUrl, apiKey: provider.apiKey, model: aiModel.value || project.value.settings.model,
-      messages: [{ role: 'system', content: finalSysContent }, ...messages.value.slice(-10).map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))],
+      messages: [{ role: 'system', content: finalSysContent }, ...recentConversationForAI()],
       temperature: 0.8, maxTokens: 4096
     }), (chunk: string) => { if (!stopFlag.value) { aiStreamingText.value += chunk; scrollToBottom() } })
     if (ret && typeof (ret as any).cancel === 'function') currentStreamCancel = (ret as any).cancel
@@ -355,6 +404,7 @@ onMounted(async () => {
   const pid = project.value?.id
   if (pid) {
     canvasLinked.value = route.query.canvas === 'linked' || localStorage.getItem(canvasLinkKey(pid)) === '1'
+    novelLinked.value = localStorage.getItem(novelLinkKey(pid)) === '1'
     if (canvasLinked.value) { localStorage.setItem(canvasLinkKey(pid), '1'); await loadCanvasContext() }
   }
   await initialiseHistory()

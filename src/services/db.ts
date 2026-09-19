@@ -140,6 +140,20 @@ export interface ChatMessageRecord {
   options?: Array<{ text: string; isCustom?: boolean }>
   selectedOption?: number
   isQuestion?: boolean
+  /** 展示文本之外，实际发送给模型的完整用户请求；用于重启后恢复真实上下文。 */
+  requestContent?: string
+  /** 本轮通过 @ 或附件关联的小说资料快照。 */
+  linkedItems?: Array<{
+    sourceId?: string
+    type?: string
+    label: string
+    content: string
+    updatedAt?: number
+  }>
+  skillId?: string
+  skillName?: string
+  promptId?: string
+  canvasLinked?: boolean
   createdAt: number
 }
 export const Messages = {
