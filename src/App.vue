@@ -1,4 +1,6 @@
 <template>
+  <StartupSplash :ready="appReady" />
+
   <!-- 自定义背景图层（毛玻璃）：位于所有内容之下，有壁纸时显示 -->
   <div class="app-wallpaper-layer"></div>
   <div class="app-wallpaper-overlay"></div>
@@ -65,6 +67,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { UploadFilled, Download, DocumentCopy } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useSettingsStore } from '@/stores/settings'
+import StartupSplash from '@/components/StartupSplash.vue'
 
 const settings = useSettingsStore()
 
@@ -84,6 +87,7 @@ const updateDialogVisible = ref(false)
 const updateInfo = ref<UpdateInfo | null>(null)
 const downloadUrl = ref('')
 const opening = ref(false)
+const appReady = ref(false)
 
 let unsubUpdate: (() => void) | null = null
 let unsubProgress: (() => void) | null = null
@@ -94,6 +98,8 @@ onMounted(async () => {
     settings.applyTheme()
   } catch (e) {
     console.error('[App] 加载设置失败（可能是 preload 未就绪）:', e)
+  } finally {
+    appReady.value = true
   }
   try {
     if (window.api?.updater?.onUpdateAvailable) {

@@ -51,7 +51,8 @@ function createWindow() {
     minWidth: 1024,
     minHeight: 680,
     show: false,
-    backgroundColor: '#1a1a1a',
+    // 与启动动画底色保持一致，避免渲染器载入前出现亮色闪屏。
+    backgroundColor: '#07101f',
     title: 'TrmWrite',
     icon: iconPath,
     autoHideMenuBar: true, // 隐藏菜单栏（按 Alt 仍可临时显示）
@@ -76,7 +77,10 @@ function createWindow() {
     mainWindow.loadURL(devUrl).catch(err => {
       console.error('[main] 加载 dev server 失败:', err)
     })
-    mainWindow.webContents.openDevTools({ mode: 'detach' })
+    // 日常开发默认也保持界面整洁；需要调试时显式设置 TRMWRITE_DEVTOOLS=1。
+    if (process.env.TRMWRITE_DEVTOOLS === '1') {
+      mainWindow.webContents.openDevTools({ mode: 'detach' })
+    }
   } else {
     console.log('[main] 生产模式，加载 dist/index.html')
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
