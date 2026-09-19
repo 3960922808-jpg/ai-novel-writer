@@ -34,7 +34,10 @@
           </template>
         </el-dropdown>
         <el-button :icon="Share" @click="insertWorkflowTemplate">插入工作流模板</el-button>
-        <el-button :icon="DocumentChecked" @click="saveAll">保存布局</el-button>
+        <el-button :icon="DocumentChecked" @click="saveAll()">保存布局</el-button>
+        <el-button type="primary" plain :icon="ChatDotRound" :disabled="nodes.length === 0" @click="openSettingsChat">
+          带入设定对话
+        </el-button>
         <el-button :icon="Download" @click="exportWorkflowMarkdown" :disabled="nodes.length === 0">导出工作流</el-button>
         <el-popconfirm
           title="确定清空画布所有节点？此操作不可恢复"
@@ -277,10 +280,11 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus, Close, Connection, ArrowDown, ArrowRight, DocumentChecked, InfoFilled,
-  ArrowLeft, MagicStick, Download, Share, DocumentCopy, Check, Delete
+  ArrowLeft, MagicStick, Download, Share, DocumentCopy, Check, Delete, ChatDotRound
 } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { useSettingsStore } from '@/stores/settings'
@@ -290,6 +294,7 @@ import type { CanvasNode, ID } from '@/types'
 
 const projectStore = useProjectStore()
 const settings = useSettingsStore()
+const router = useRouter()
 const project = computed(() => projectStore.current)
 const chapters = computed(() => projectStore.chapters)
 
@@ -715,15 +720,26 @@ async function save() {
   }
 }
 
-async function saveAll() {
+async function saveAll(showSuccess = true): Promise<boolean> {
   try {
     for (const n of nodes.value) {
       await db.Canvas.save(toPlain(n))
     }
-    ElMessage.success('布局已保存')
+    if (showSuccess) ElMessage.success('布局已保存')
+    return true
   } catch (e: any) {
     ElMessage.error('保存失败：' + e.message)
+    return false
   }
+}
+
+async function openSettingsChat() {
+  if (!project.value || nodes.value.length === 0) return
+  const saved = await saveAll(false)
+  if (!saved) return
+  localStorage.setItem(`trmwrite:settings-canvas-linked:${project.value.id}`, '1')
+  ElMessage.success('画布已保存并链接到设定对话')
+  await router.push({ name: 'chat', params: { id: project.value.id }, query: { canvas: 'linked' } })
 }
 
 async function remove(node: CanvasNode) {

@@ -130,7 +130,7 @@ export const StyleProfiles = {
 
 // ====== 对话历史（按 projectId + sessionId 持久化） ======
 // Editor.vue 的 sessionId = chapterId（每章独立对话）
-// ChatSettings.vue 的 sessionId = 'settings'（设定对话）
+// ChatSettings.vue 的 sessionId = 'settings:*'（设定对话多会话；兼容旧值 'settings'）
 export interface ChatMessageRecord {
   id: string
   projectId: string
@@ -171,9 +171,6 @@ export const Messages = {
   /** 删除某项目下某会话的所有消息 */
   async clearSession(pid: string, sessionId: string): Promise<void> {
     const all = await list<ChatMessageRecord>('messages', pid)
-    const keep = all.filter(m => m.sessionId !== sessionId)
-    // 用 bulkSave 覆盖：先删全部再写回 keep 不可行（bulkSave 是 upsert），
-    // 改为逐条删除该会话消息
     const toDel = all.filter(m => m.sessionId === sessionId)
     for (const m of toDel) {
       await remove('messages', m.id)

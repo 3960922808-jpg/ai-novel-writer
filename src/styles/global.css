@@ -19,6 +19,7 @@
   --radius: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
+  --button-radius: 999px;
   /* 背景图相关变量（由 settings.applyWallpaper 设置） */
   --app-wallpaper: none;
   --app-wallpaper-blur: 20px;
@@ -170,7 +171,7 @@ html.has-wallpaper .card {
   align-items: center;
   gap: 6px;
   padding: 8px 14px;
-  border-radius: var(--radius);
+  border-radius: var(--button-radius);
   border: 1px solid var(--border);
   background: var(--panel);
   color: var(--text);
@@ -242,6 +243,30 @@ html.has-wallpaper .card {
   --el-button-hover-border-color: var(--primary-dark);
 }
 .el-button--primary:hover { opacity: 0.9; }
+
+/* 全局按钮统一为圆润胶囊风格；纯图标按钮仍保持正圆 */
+.el-button:not(.is-circle) {
+  border-radius: var(--button-radius) !important;
+  padding-left: 16px;
+  padding-right: 16px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+.el-button:not(.is-circle):not(.is-disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(59, 130, 196, 0.12);
+}
+.el-button.is-circle {
+  border-radius: 50% !important;
+}
+.el-button-group > .el-button:first-child:not(:last-child) {
+  border-radius: var(--button-radius) 0 0 var(--button-radius) !important;
+}
+.el-button-group > .el-button:last-child:not(:first-child) {
+  border-radius: 0 var(--button-radius) var(--button-radius) 0 !important;
+}
+.el-button-group > .el-button:not(:first-child):not(:last-child) {
+  border-radius: 0 !important;
+}
 
 /* ====== 通用对话气泡样式（Editor / ChatSettings 共用风格） ======
  * 用户消息：主色气泡，右对齐
