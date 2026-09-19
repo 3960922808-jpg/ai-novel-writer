@@ -52,7 +52,7 @@ function createWindow() {
     minHeight: 680,
     show: false,
     // 与启动动画底色保持一致，避免渲染器载入前出现亮色闪屏。
-    backgroundColor: '#07101f',
+    backgroundColor: '#ffffff',
     title: 'TrmWrite',
     icon: iconPath,
     autoHideMenuBar: true, // 隐藏菜单栏（按 Alt 仍可临时显示）
