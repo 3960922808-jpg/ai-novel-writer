@@ -95,14 +95,19 @@ export const useSettingsStore = defineStore('settings', () => {
     }
 
     /**
-     * 应用自定义背景图：
-     * - 有壁纸时，背景层显示图片并模糊，同时把 --bg/--panel/--panel-2 覆盖为半透明，
+     * 应用自定义图片或视频背景：
+     * - 有媒体时，把 --bg/--panel/--panel-2 覆盖为半透明，
      *   使所有面板自然透出模糊背景，形成毛玻璃质感（既能看清又有点看不清）。
      * - 无壁纸时，恢复为不透明纯色主题。
      */
     function applyWallpaper(isDark: boolean) {
       const root = document.documentElement
       const wp = settings.value?.wallpaper
+      const videoPath = settings.value?.backgroundVideoPath
+      const requestedType = settings.value?.backgroundType || (wp ? 'image' : 'none')
+      const useImage = requestedType === 'image' && !!wp
+      const useVideo = requestedType === 'video' && !!videoPath
+      const hasMedia = useImage || useVideo
       const blur = settings.value?.wallpaperBlur ?? 20
       const imageOpacity = Math.max(20, Math.min(100, settings.value?.wallpaperOpacity ?? 100)) / 100
       const overlay = Math.max(0, Math.min(90, settings.value?.wallpaperOverlay ?? 20)) / 100
@@ -111,8 +116,8 @@ export const useSettingsStore = defineStore('settings', () => {
       const position = ['top', 'bottom'].includes(settings.value?.wallpaperPosition || '')
         ? settings.value!.wallpaperPosition!
         : 'center'
-      if (wp) {
-        root.style.setProperty('--app-wallpaper', `url("${wp}")`)
+      if (hasMedia) {
+        root.style.setProperty('--app-wallpaper', useImage ? `url("${wp}")` : 'none')
         root.style.setProperty('--app-wallpaper-blur', `${blur}px`)
         root.style.setProperty('--app-wallpaper-opacity', String(imageOpacity))
         root.style.setProperty('--app-wallpaper-size', fit)
@@ -120,7 +125,8 @@ export const useSettingsStore = defineStore('settings', () => {
         root.style.setProperty('--app-wallpaper-overlay', isDark
           ? `rgba(3, 7, 18, ${overlay})`
           : `rgba(255, 255, 255, ${overlay})`)
-        root.classList.add('has-wallpaper')
+        root.classList.toggle('has-wallpaper', useImage)
+        root.classList.toggle('has-video-wallpaper', useVideo)
         // 覆盖为半透明，让面板透出模糊背景
         if (isDark) {
           root.style.setProperty('--bg', `rgba(15, 23, 42, ${Math.max(.35, panelOpacity - .12)})`)
@@ -139,6 +145,7 @@ export const useSettingsStore = defineStore('settings', () => {
         root.style.removeProperty('--app-wallpaper-position')
         root.style.removeProperty('--app-wallpaper-overlay')
         root.classList.remove('has-wallpaper')
+        root.classList.remove('has-video-wallpaper')
         root.style.removeProperty('--bg')
         root.style.removeProperty('--panel')
         root.style.removeProperty('--panel-2')

@@ -3,6 +3,16 @@
 
   <!-- 自定义背景图层（毛玻璃）：位于所有内容之下，有壁纸时显示 -->
   <div class="app-wallpaper-layer"></div>
+  <video
+    v-if="backgroundVideoUrl"
+    ref="backgroundVideoElement"
+    :key="backgroundVideoUrl"
+    class="app-video-wallpaper"
+    :src="backgroundVideoUrl"
+    autoplay muted loop playsinline disablepictureinpicture
+    @loadedmetadata="applyVideoPlaybackRate"
+    @error="handleBackgroundVideoError"
+  ></video>
   <div class="app-wallpaper-overlay"></div>
 
   <router-view />
@@ -63,7 +73,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { UploadFilled, Download, DocumentCopy } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useSettingsStore } from '@/stores/settings'
@@ -88,11 +98,53 @@ const updateInfo = ref<UpdateInfo | null>(null)
 const downloadUrl = ref('')
 const opening = ref(false)
 const appReady = ref(false)
+const backgroundVideoFailed = ref(false)
+const backgroundVideoElement = ref<HTMLVideoElement | null>(null)
+const backgroundVideoPath = computed(() => {
+  if (settings.settings?.backgroundType !== 'video') return ''
+  return settings.settings.backgroundVideoPath || ''
+})
+const backgroundVideoUrl = computed(() => {
+  if (!backgroundVideoPath.value || backgroundVideoFailed.value) return ''
+  return `trm-media://background/current?rev=${encodeURIComponent(backgroundVideoPath.value)}`
+})
+const backgroundVideoPlaybackRate = computed(() => settings.settings?.backgroundVideoPlaybackRate ?? 1)
+
+watch(backgroundVideoPath, () => { backgroundVideoFailed.value = false })
+watch(backgroundVideoPlaybackRate, rate => {
+  if (backgroundVideoElement.value) {
+    backgroundVideoElement.value.playbackRate = Math.max(.25, Math.min(2, rate))
+  }
+})
+
+function applyVideoPlaybackRate(event: Event) {
+  const video = event.currentTarget as HTMLVideoElement
+  video.playbackRate = Math.max(.25, Math.min(2, settings.settings?.backgroundVideoPlaybackRate ?? 1))
+  video.play().catch(() => {})
+}
+
+function handleBackgroundVideoError() {
+  backgroundVideoFailed.value = true
+  const root = document.documentElement
+  root.classList.remove('has-video-wallpaper')
+  root.style.removeProperty('--bg')
+  root.style.removeProperty('--panel')
+  root.style.removeProperty('--panel-2')
+  console.warn('[App] 背景视频无法播放，已回退为纯色背景')
+}
+
+function syncBackgroundVideoVisibility() {
+  const video = backgroundVideoElement.value
+  if (!video) return
+  if (document.hidden) video.pause()
+  else video.play().catch(() => {})
+}
 
 let unsubUpdate: (() => void) | null = null
 let unsubProgress: (() => void) | null = null
 
 onMounted(async () => {
+  document.addEventListener('visibilitychange', syncBackgroundVideoVisibility)
   try {
     await settings.load()
     settings.applyTheme()
@@ -123,6 +175,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  document.removeEventListener('visibilitychange', syncBackgroundVideoVisibility)
   if (unsubUpdate) unsubUpdate()
   if (unsubProgress) unsubProgress()
 })

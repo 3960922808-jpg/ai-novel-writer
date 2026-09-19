@@ -204,6 +204,11 @@ export interface AppSettings {
   // 壁纸填充方式与对齐位置
   wallpaperFit?: 'cover' | 'contain'
   wallpaperPosition?: 'center' | 'top' | 'bottom'
+  // 工作台背景类型；视频保存本地路径并通过受限媒体协议播放
+  backgroundType?: 'none' | 'image' | 'video'
+  backgroundVideoPath?: string
+  backgroundVideoMuted?: boolean
+  backgroundVideoPlaybackRate?: number
   // 图片生成配置（小说封面生成）。仅支持 OpenAI gpt-image-1 与 Google Imagen
   imageGen?: ImageGenConfig
 }

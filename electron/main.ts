@@ -1,6 +1,6 @@
-import { app, BrowserWindow, ipcMain, Menu, shell, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, shell, dialog, protocol, net } from 'electron'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import fs from 'node:fs'
 import { registerStoreIPC } from './ipc/store'
 import { registerAIIPC } from './ipc/ai'
@@ -9,11 +9,42 @@ import { registerFileIPC } from './ipc/files'
 import { registerSearchIPC } from './ipc/search'
 import { registerObsidianIPC } from './ipc/obsidian'
 import { registerSweepIPC } from './ipc/sweep'
-import { initDB } from './lib/db'
+import { getDB, initDB } from './lib/db'
 import { startUpdater, checkOnce, downloadAndRestart, openDownloadInBrowser } from './lib/updater'
 import { isSafeExternalUrl } from './lib/security'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+protocol.registerSchemesAsPrivileged([{
+  scheme: 'trm-media',
+  privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+}])
+
+function registerBackgroundMediaProtocol() {
+  protocol.handle('trm-media', async request => {
+    try {
+      const url = new URL(request.url)
+      if (url.hostname !== 'background' || url.pathname !== '/current') {
+        return new Response('Not found', { status: 404 })
+      }
+      const videoPath = getDB().data.settings?.backgroundVideoPath
+      if (typeof videoPath !== 'string' || !videoPath || !fs.existsSync(videoPath)) {
+        return new Response('Background video not found', { status: 404 })
+      }
+      const allowed = new Set(['.mp4', '.webm', '.mov', '.m4v', '.ogv'])
+      if (!allowed.has(path.extname(videoPath).toLowerCase())) {
+        return new Response('Unsupported background video', { status: 415 })
+      }
+      return net.fetch(pathToFileURL(videoPath).toString(), {
+        headers: request.headers,
+        bypassCustomProtocolHandlers: true
+      })
+    } catch (error) {
+      console.error('[media] 背景视频读取失败:', error)
+      return new Response('Background video failed', { status: 500 })
+    }
+  })
+}
 
 // 找 preload 文件：优先 .js，回退 .mjs
 function findPreload(): string {
@@ -122,6 +153,7 @@ app.whenReady().then(async () => {
   // Electron 31 的 App 类型没有公开 setIcon，这里不调用
   try {
     await initDB()
+    registerBackgroundMediaProtocol()
     console.log('[main] 数据库初始化成功')
   } catch (e: any) {
     console.error('[main] 数据库初始化失败:', e)

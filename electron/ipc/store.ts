@@ -1,6 +1,7 @@
 import { ipcMain, safeStorage } from 'electron'
 import { getDB, writeDB } from '../lib/db'
 import { v4 as uuidv4 } from 'uuid'
+import path from 'node:path'
 
 const COLLECTIONS = [
   'chapters', 'locations', 'lore',
@@ -243,7 +244,11 @@ export function registerStoreIPC() {
         wallpaperOverlay: 20,
         panelOpacity: 72,
         wallpaperFit: 'cover',
-        wallpaperPosition: 'center'
+        wallpaperPosition: 'center',
+        backgroundType: 'none',
+        backgroundVideoPath: '',
+        backgroundVideoMuted: true,
+        backgroundVideoPlaybackRate: 1
       }
       await writeDB()
       console.log('[settings] 首次创建默认 settings')
@@ -291,6 +296,13 @@ export function registerStoreIPC() {
       db.data.settings.wallpaperPosition = 'center'
       settingsChanged = true
     }
+    if (db.data.settings && db.data.settings.backgroundType === undefined) {
+      db.data.settings.backgroundType = db.data.settings.wallpaper ? 'image' : 'none'
+      db.data.settings.backgroundVideoPath = ''
+      db.data.settings.backgroundVideoMuted = true
+      db.data.settings.backgroundVideoPlaybackRate = 1
+      settingsChanged = true
+    }
     if (safeStorage.isEncryptionAvailable()) {
       const protectedSettings = protectSettingsSecrets(db.data.settings)
       if (JSON.stringify(protectedSettings) !== JSON.stringify(db.data.settings)) {
@@ -324,6 +336,23 @@ export function registerStoreIPC() {
     if ('wallpaperPosition' in normalized && !['top', 'center', 'bottom'].includes(normalized.wallpaperPosition)) {
       throw new Error('壁纸位置无效')
     }
+    if ('backgroundType' in normalized && !['none', 'image', 'video'].includes(normalized.backgroundType)) {
+      throw new Error('背景类型无效')
+    }
+    if ('backgroundVideoPath' in normalized) {
+      if (typeof normalized.backgroundVideoPath !== 'string' || normalized.backgroundVideoPath.length > 2048) {
+        throw new Error('背景视频路径无效')
+      }
+      if (normalized.backgroundVideoPath && !['.mp4', '.webm', '.mov', '.m4v', '.ogv'].includes(path.extname(normalized.backgroundVideoPath).toLowerCase())) {
+        throw new Error('背景视频格式无效')
+      }
+    }
+    if ('backgroundVideoPlaybackRate' in normalized) {
+      const rate = Number(normalized.backgroundVideoPlaybackRate)
+      if (!Number.isFinite(rate)) throw new Error('视频播放速度无效')
+      normalized.backgroundVideoPlaybackRate = Math.max(0.25, Math.min(2, rate))
+    }
+    if ('backgroundVideoMuted' in normalized) normalized.backgroundVideoMuted = true
     if ('wallpaper' in normalized) {
       if (typeof normalized.wallpaper !== 'string' || normalized.wallpaper.length > 36 * 1024 * 1024) {
         throw new Error('背景图片数据无效或文件过大')

@@ -4,6 +4,7 @@ import path from 'node:path'
 import JSZip from 'jszip'
 
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024
+const MAX_VIDEO_BYTES = 1024 * 1024 * 1024
 const MAX_NOVEL_BYTES = 25 * 1024 * 1024
 const MAX_DOCX_XML_BYTES = 20 * 1024 * 1024
 const MAX_SKILL_FILE_BYTES = 2 * 1024 * 1024
@@ -83,6 +84,23 @@ export function registerFileIPC() {
       return `data:image/${mime};base64,${buf.toString('base64')}`
     } catch (e: any) {
       throw new Error('读取图片失败：' + e.message)
+    }
+  })
+
+  ipcMain.handle('file:select-video', async () => {
+    try {
+      const r = await dialog.showOpenDialog({
+        title: '选择工作台背景视频',
+        properties: ['openFile'],
+        filters: [{ name: '视频', extensions: ['mp4', 'webm', 'mov', 'm4v', 'ogv'] }]
+      })
+      if (r.canceled || r.filePaths.length === 0) return null
+      const filePath = r.filePaths[0]
+      await assertFileSize(filePath, MAX_VIDEO_BYTES, '视频')
+      await approveFile(filePath)
+      return filePath
+    } catch (e: any) {
+      throw new Error('选择视频失败：' + e.message)
     }
   })
 

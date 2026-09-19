@@ -85,6 +85,12 @@
         </el-form-item>
 
         <div class="appearance-preview" :class="{ 'with-wallpaper': !!form.wallpaper }" :style="appearancePreviewStyle">
+          <video
+            v-if="form.backgroundType === 'video' && form.backgroundVideoPath"
+            class="preview-video"
+            :src="backgroundVideoPreviewUrl"
+            autoplay muted loop playsinline
+          ></video>
           <div class="preview-sidebar"></div>
           <div class="preview-body">
             <span class="preview-pill"></span>
@@ -95,7 +101,11 @@
           <span class="preview-label">实时预览</span>
         </div>
 
-        <el-form-item label="背景图片">
+        <el-form-item label="工作台背景">
+          <el-segmented v-model="form.backgroundType" :options="backgroundTypeOptions" @change="onBackgroundTypeChange" />
+        </el-form-item>
+
+        <el-form-item v-if="form.backgroundType === 'image'" label="背景图片">
           <div class="wallpaper-row">
             <div class="wallpaper-preview" :style="wallpaperPreviewStyle">
               <el-icon v-if="!form.wallpaper" :size="28" color="#cbd5e1"><Picture /></el-icon>
@@ -113,7 +123,18 @@
           </div>
         </el-form-item>
 
-        <el-form-item label="背景模糊度" v-if="form.wallpaper">
+        <el-form-item v-if="form.backgroundType === 'video'" label="背景视频">
+          <div class="video-background-row">
+            <div class="video-file-info">
+              <strong>{{ backgroundVideoName || '尚未选择视频' }}</strong>
+              <span class="text-faint text-xs">支持 MP4、WebM、MOV、M4V、OGV，最大 1 GB；始终静音循环播放</span>
+            </div>
+            <el-button size="small" :icon="Upload" @click="pickBackgroundVideo">选择视频</el-button>
+            <el-button v-if="form.backgroundVideoPath" size="small" :icon="Delete" @click="removeBackgroundVideo">移除视频</el-button>
+          </div>
+        </el-form-item>
+
+        <el-form-item label="背景模糊度" v-if="hasBackgroundMedia">
           <div class="slider-row">
             <el-slider v-model="form.wallpaperBlur" :min="0" :max="40" :step="1" style="flex: 1" @input="onWallpaperBlurChange" />
             <span class="slider-val">{{ form.wallpaperBlur }}px</span>
@@ -123,7 +144,7 @@
           </span>
         </el-form-item>
 
-        <template v-if="form.wallpaper">
+        <template v-if="hasBackgroundMedia">
           <el-form-item label="壁纸亮度">
             <div class="slider-row">
               <el-slider v-model="form.wallpaperOpacity" :min="20" :max="100" :step="1" style="flex: 1" @input="onAppearanceSliderChange" />
@@ -145,11 +166,15 @@
             </div>
           </el-form-item>
 
-          <el-form-item label="图片显示">
+          <el-form-item label="媒体显示">
             <div class="wallpaper-layout-options">
               <el-segmented v-model="form.wallpaperFit" :options="wallpaperFitOptions" @change="onAppearanceSliderChange" />
               <el-segmented v-model="form.wallpaperPosition" :options="wallpaperPositionOptions" @change="onAppearanceSliderChange" />
             </div>
+          </el-form-item>
+
+          <el-form-item v-if="form.backgroundType === 'video'" label="播放速度">
+            <el-segmented v-model="form.backgroundVideoPlaybackRate" :options="videoRateOptions" @change="onAppearanceSliderChange" />
           </el-form-item>
         </template>
 
@@ -488,6 +513,10 @@ const form = reactive<AppSettings>({
     panelOpacity: 72,
     wallpaperFit: 'cover',
     wallpaperPosition: 'center',
+    backgroundType: 'none',
+    backgroundVideoPath: '',
+    backgroundVideoMuted: true,
+    backgroundVideoPlaybackRate: 1,
     imageGen: {
       provider: 'openai',
       openaiApiKey: '',
@@ -523,6 +552,16 @@ const wallpaperPositionOptions = [
   { label: '顶部', value: 'top' },
   { label: '居中', value: 'center' },
   { label: '底部', value: 'bottom' }
+]
+const backgroundTypeOptions = [
+  { label: '纯色', value: 'none' },
+  { label: '图片', value: 'image' },
+  { label: '视频', value: 'video' }
+]
+const videoRateOptions = [
+  { label: '慢速', value: .5 },
+  { label: '正常', value: 1 },
+  { label: '轻快', value: 1.25 }
 ]
 
 async function checkNow() {
@@ -805,6 +844,10 @@ function fillForm(s: AppSettings) {
   if (form.panelOpacity === undefined) form.panelOpacity = 72
   if (!form.wallpaperFit) form.wallpaperFit = 'cover'
   if (!form.wallpaperPosition) form.wallpaperPosition = 'center'
+  if (!form.backgroundType) form.backgroundType = form.wallpaper ? 'image' : 'none'
+  if (!form.backgroundVideoPath) form.backgroundVideoPath = ''
+  form.backgroundVideoMuted = true
+  if (!form.backgroundVideoPlaybackRate) form.backgroundVideoPlaybackRate = 1
   // imageGen 兼容：老数据没有此字段
   if (!form.imageGen || typeof form.imageGen !== 'object') {
     form.imageGen = {
@@ -893,6 +936,26 @@ const appearancePreviewStyle = computed(() => ({
   '--preview-panel-opacity': String((form.panelOpacity ?? 72) / 100)
 }))
 
+const hasBackgroundMedia = computed(() => (
+  (form.backgroundType === 'image' && !!form.wallpaper) ||
+  (form.backgroundType === 'video' && !!form.backgroundVideoPath)
+))
+const backgroundVideoName = computed(() => {
+  const value = form.backgroundVideoPath || ''
+  return value.split(/[\\/]/).pop() || ''
+})
+const backgroundVideoPreviewUrl = computed(() => form.backgroundVideoPath
+  ? `trm-media://background/current?preview=${encodeURIComponent(form.backgroundVideoPath)}`
+  : '')
+
+function onBackgroundTypeChange() {
+  persistAppearance({
+    backgroundType: form.backgroundType,
+    backgroundVideoPath: form.backgroundVideoPath,
+    wallpaper: form.wallpaper
+  }, true)
+}
+
 async function pickWallpaper() {
   try {
     const filePath = await window.api.file.selectImage()
@@ -904,8 +967,10 @@ async function pickWallpaper() {
       return
     }
     form.wallpaper = dataUrl
+    form.backgroundType = 'image'
     await settingsStore.update({
       wallpaper: dataUrl,
+      backgroundType: 'image',
       wallpaperBlur: form.wallpaperBlur,
       wallpaperOpacity: form.wallpaperOpacity,
       wallpaperOverlay: form.wallpaperOverlay,
@@ -921,8 +986,40 @@ async function pickWallpaper() {
 
 function removeWallpaper() {
   form.wallpaper = ''
-  settingsStore.update({ wallpaper: '' })
+  form.backgroundType = 'none'
+  settingsStore.update({ wallpaper: '', backgroundType: 'none' })
   ElMessage.success('已移除背景图')
+}
+
+async function pickBackgroundVideo() {
+  try {
+    const filePath = await window.api.file.selectVideo()
+    if (!filePath) return
+    await settingsStore.update({
+      backgroundType: 'video',
+      backgroundVideoPath: filePath,
+      backgroundVideoMuted: true,
+      backgroundVideoPlaybackRate: form.backgroundVideoPlaybackRate,
+      wallpaperBlur: form.wallpaperBlur,
+      wallpaperOpacity: form.wallpaperOpacity,
+      wallpaperOverlay: form.wallpaperOverlay,
+      panelOpacity: form.panelOpacity,
+      wallpaperFit: form.wallpaperFit,
+      wallpaperPosition: form.wallpaperPosition
+    })
+    form.backgroundVideoPath = filePath
+    form.backgroundType = 'video'
+    ElMessage.success('背景视频已设置')
+  } catch (e: any) {
+    ElMessage.error('视频设置失败：' + (e?.message || '未知错误'))
+  }
+}
+
+async function removeBackgroundVideo() {
+  form.backgroundVideoPath = ''
+  form.backgroundType = 'none'
+  await settingsStore.update({ backgroundVideoPath: '', backgroundType: 'none' })
+  ElMessage.success('已移除背景视频')
 }
 
 function onWallpaperBlurChange() {
@@ -936,7 +1033,8 @@ function onAppearanceSliderChange() {
     wallpaperOverlay: form.wallpaperOverlay,
     panelOpacity: form.panelOpacity,
     wallpaperFit: form.wallpaperFit,
-    wallpaperPosition: form.wallpaperPosition
+    wallpaperPosition: form.wallpaperPosition,
+    backgroundVideoPlaybackRate: form.backgroundVideoPlaybackRate
   })
 }
 
@@ -950,7 +1048,11 @@ async function resetAppearance() {
     wallpaperOverlay: 20,
     panelOpacity: 72,
     wallpaperFit: 'cover',
-    wallpaperPosition: 'center'
+    wallpaperPosition: 'center',
+    backgroundType: 'none',
+    backgroundVideoPath: '',
+    backgroundVideoMuted: true,
+    backgroundVideoPlaybackRate: 1
   })
   await settingsStore.update({
     themeMode: 'light',
@@ -961,7 +1063,11 @@ async function resetAppearance() {
     wallpaperOverlay: 20,
     panelOpacity: 72,
     wallpaperFit: 'cover',
-    wallpaperPosition: 'center'
+    wallpaperPosition: 'center',
+    backgroundType: 'none',
+    backgroundVideoPath: '',
+    backgroundVideoMuted: true,
+    backgroundVideoPlaybackRate: 1
   })
   ElMessage.success('已恢复默认外观')
 }
@@ -992,12 +1098,6 @@ function removeModel(idx: number, mi: number) {
 }
 
 async function save() {
-  // 校验：至少配置一个 Provider 的 API Key
-  const hasKey = form.apiKeys.some(p => p.apiKey && p.apiKey.trim() && p.models.length > 0)
-  if (!hasKey) {
-    ElMessage.warning('请至少为某个 Provider 配置 API Key 与模型')
-    return
-  }
   saving.value = true
   try {
     await settingsStore.update({
@@ -1020,6 +1120,10 @@ async function save() {
       panelOpacity: form.panelOpacity,
       wallpaperFit: form.wallpaperFit,
       wallpaperPosition: form.wallpaperPosition,
+      backgroundType: form.backgroundType,
+      backgroundVideoPath: form.backgroundVideoPath,
+      backgroundVideoMuted: true,
+      backgroundVideoPlaybackRate: form.backgroundVideoPlaybackRate,
       imageGen: JSON.parse(JSON.stringify(form.imageGen))
     })
     ElMessage.success('已保存')
@@ -1039,9 +1143,6 @@ let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
 let pendingAutoSave: Promise<any> | null = null
 
 async function autoSaveApiKeys() {
-  // 校验：至少一个 Provider 有 Key 且有模型才写回，避免把空配置覆盖到磁盘
-  const hasKey = form.apiKeys.some(p => p.apiKey && p.apiKey.trim() && p.models.length > 0)
-  if (!hasKey) return
   try {
     pendingAutoSave = settingsStore.update({
       apiKeys: JSON.parse(JSON.stringify(form.apiKeys))
@@ -1175,6 +1276,15 @@ onBeforeUnmount(() => {
   background: var(--bg);
   opacity: .18;
 }
+.preview-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: var(--preview-size, cover);
+  object-position: var(--preview-position, center);
+  opacity: var(--preview-image-opacity, 1);
+}
 .preview-sidebar {
   position: relative;
   z-index: 1;
@@ -1226,6 +1336,28 @@ html.dark .preview-body { background: rgba(30,41,59,var(--preview-panel-opacity)
   flex-direction: column;
   gap: 6px;
   flex: 1;
+}
+.video-background-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  width: 100%;
+}
+.video-file-info {
+  display: flex;
+  flex: 1;
+  min-width: 260px;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+}
+.video-file-info strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .provider-card {
   padding: 16px;

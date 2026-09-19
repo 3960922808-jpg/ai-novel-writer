@@ -79,6 +79,7 @@ const api = {
   file: {
     selectImage: () => ipcRenderer.invoke('file:select-image'),
     readImageBase64: (filePath: string) => ipcRenderer.invoke('file:read-image', filePath),
+    selectVideo: () => ipcRenderer.invoke('file:select-video'),
     selectNovel: () => ipcRenderer.invoke('file:select-novel'),
     readNovelText: (filePath: string) => ipcRenderer.invoke('file:read-novel', filePath),
     // 选择文件夹（用于 skill 导入等场景）

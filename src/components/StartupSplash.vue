@@ -34,7 +34,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const props = defineProps<{ ready?: boolean }>()
 
-const version = '2.1.4'
+const version = '2.1.5'
 const visible = ref(true)
 const progress = ref(4)
 const startedAt = Date.now()
@@ -248,8 +248,18 @@ onBeforeUnmount(() => {
   animation: rise-in .8s .75s ease-out both;
 }
 
-.splash-fade-leave-active { transition: opacity .42s ease, transform .42s ease; }
-.splash-fade-leave-to { opacity: 0; transform: scale(1.012); }
+.splash-fade-leave-active {
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,.1) 15%, #000 42%, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,.1) 15%, #000 42%, #000 100%);
+  -webkit-mask-size: 100% 260%;
+  mask-size: 100% 260%;
+  animation: splash-gradient-away .78s cubic-bezier(.55,.05,.25,1) both;
+}
+.splash-fade-leave-active .splash-content,
+.splash-fade-leave-active .version { transition: opacity .38s ease, transform .5s ease; }
+.splash-fade-leave-to .splash-content { opacity: 0; transform: translateY(-12px) scale(.985); }
+.splash-fade-leave-to .version { opacity: 0; }
 
 @keyframes wordmark-in {
   from { opacity: 0; transform: translateY(16px) scale(.96); filter: blur(5px); }
@@ -258,6 +268,11 @@ onBeforeUnmount(() => {
 @keyframes rise-in { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
 @keyframes progress-shine { 0%, 20% { transform: translateX(-130%); } 75%, 100% { transform: translateX(280%); } }
 @keyframes dot-breathe { 0%, 100% { opacity: .55; transform: scale(.82); } 50% { opacity: 1; transform: scale(1); } }
+@keyframes splash-gradient-away {
+  0% { opacity: 1; -webkit-mask-position: 0 100%; mask-position: 0 100%; filter: blur(0); }
+  58% { opacity: .92; }
+  100% { opacity: 0; -webkit-mask-position: 0 0; mask-position: 0 0; filter: blur(4px); }
+}
 
 @media (max-height: 640px) {
   .wordmark { font-size: 52px; }

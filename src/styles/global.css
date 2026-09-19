@@ -83,6 +83,21 @@ html, body, #app {
 html.has-wallpaper .app-wallpaper-layer {
   opacity: var(--app-wallpaper-opacity, 1);
 }
+.app-video-wallpaper {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+  object-fit: var(--app-wallpaper-size, cover);
+  object-position: var(--app-wallpaper-position, center);
+  opacity: 0;
+  filter: blur(var(--app-wallpaper-blur, 0px));
+  transform: scale(1.1);
+  pointer-events: none;
+  transition: opacity .45s ease;
+}
+html.has-video-wallpaper .app-video-wallpaper { opacity: var(--app-wallpaper-opacity, 1); }
 .app-wallpaper-overlay {
   position: fixed;
   inset: 0;
@@ -92,10 +107,12 @@ html.has-wallpaper .app-wallpaper-layer {
   pointer-events: none;
   transition: opacity 0.4s ease;
 }
-html.has-wallpaper .app-wallpaper-overlay {
+html.has-wallpaper .app-wallpaper-overlay,
+html.has-video-wallpaper .app-wallpaper-overlay {
   opacity: 1;
 }
 html.has-wallpaper.dark .app-wallpaper-overlay { background: var(--app-wallpaper-overlay, rgba(0, 0, 0, 0.3)); }
+html.has-video-wallpaper.dark .app-wallpaper-overlay { background: var(--app-wallpaper-overlay, rgba(0, 0, 0, 0.3)); }
 
 /* 滚动条 */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
