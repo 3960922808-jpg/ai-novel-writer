@@ -18,7 +18,7 @@
       <nav class="nav">
         <router-link
           v-for="item in navItems" :key="item.name"
-          :to="{ name: item.name }"
+          :to="navTarget(item.name)"
           class="nav-item"
           :title="item.label"
         >
@@ -89,6 +89,15 @@ const navItems = [
 ]
 
 const loading = ref(true)
+
+function navTarget(name: string) {
+  if (name !== 'editor') return { name }
+  const chapter = projectStore.chapters[0]
+  return chapter
+    ? { name: 'editor', params: { chapterId: chapter.id } }
+    : { name: 'chapters' }
+}
+
 onMounted(async () => {
   const id = route.params.id as string
   if (!id) { router.push('/'); return }

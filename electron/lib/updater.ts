@@ -65,14 +65,10 @@ interface GitHubRelease {
   }>
 }
 
-// 从 package.json 读取当前版本
+// 直接使用 Electron 的应用版本，避免 ESM 构建产物中不存在 __dirname。
 function getLocalVersion(): string {
   try {
-    const pkgPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'app.asar', 'package.json')
-      : path.join(__dirname, '..', 'package.json')
-    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'))
-    return (pkg.version || '0.0.0').replace(/^v/, '')
+    return (app.getVersion() || '0.0.0').replace(/^v/, '')
   } catch (e) {
     console.error('[updater] 读取本地版本失败:', e)
     return '0.0.0'

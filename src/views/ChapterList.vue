@@ -201,7 +201,9 @@ async function remove(c: Chapter) {
 }
 
 async function aiSummary(c: Chapter) {
-  const provider = settings.findProviderForModel(project.value!.settings.model)
+  const model = project.value!.settings.model || settings.defaultModel()
+  if (!model) { ElMessage.warning('请先在设置中配置可用模型'); return }
+  const provider = settings.findProviderForModel(model)
   if (!provider?.apiKey) { ElMessage.warning('请先在设置中配置 API Key'); return }
   try {
     const prompts = await Prompts.list(project.value!.id)
@@ -211,7 +213,7 @@ async function aiSummary(c: Chapter) {
     ElMessage.info('生成中...')
     const text = await ai.chat(ai.buildRequest({
       baseUrl: provider.baseUrl, apiKey: provider.apiKey,
-      model: project.value!.settings.model, messages: [msg], temperature: 0.5
+      model, messages: [msg], temperature: 0.5
     }))
     c.summary = text.trim()
     await db.Chapters.save(c)

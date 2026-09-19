@@ -156,7 +156,11 @@ export function registerStoreIPC() {
         searchApiKey: '',
         autoUpdateCheck: true,
         lastCommitSha: '',
-        zoomLevel: 100
+        askMode: 'auto',
+        themeMode: 'light',
+        zoomLevel: 100,
+        wallpaper: '',
+        wallpaperBlur: 20
       }
       await db.write()
       console.log('[settings] 首次创建默认 settings')
@@ -178,6 +182,15 @@ export function registerStoreIPC() {
     }
     if (db.data.settings && db.data.settings.zoomLevel === undefined) {
       db.data.settings.zoomLevel = 100
+    }
+    if (db.data.settings && db.data.settings.askMode === undefined) {
+      db.data.settings.askMode = 'auto'
+    }
+    if (db.data.settings && db.data.settings.themeMode === undefined) {
+      db.data.settings.themeMode = db.data.settings.theme === 'dark' ? 'dark' : 'light'
+    }
+    if (db.data.settings && db.data.settings.wallpaperBlur === undefined) {
+      db.data.settings.wallpaperBlur = 20
     }
     if (db.data.settings) {
       if (!('searchProvider' in db.data.settings) || db.data.settings.autoUpdateCheck === undefined || db.data.settings.zoomLevel === undefined) {

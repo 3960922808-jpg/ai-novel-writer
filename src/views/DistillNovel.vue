@@ -56,9 +56,9 @@
         </el-form-item>
         <el-form-item label="分析深度">
           <el-radio-group v-model="depth">
-            <el-radio-button label="quick">快速（约 1 次 AI 调用）</el-radio-button>
-            <el-radio-button label="standard">标准（约 2 次 AI 调用）</el-radio-button>
-            <el-radio-button label="deep">深度（约 4 次 AI 调用）</el-radio-button>
+            <el-radio-button value="quick">快速（约 1 次 AI 调用）</el-radio-button>
+            <el-radio-button value="standard">标准（约 2 次 AI 调用）</el-radio-button>
+            <el-radio-button value="deep">深度（约 4 次 AI 调用）</el-radio-button>
           </el-radio-group>
           <div class="text-faint text-xs" style="margin-top: 4px">
             深度分析会拆成多维度分别蒸馏，输出更细但耗时更长

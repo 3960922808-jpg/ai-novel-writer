@@ -761,20 +761,36 @@ const editor = useEditor({
     CharacterCount.configure({ limit: null })
   ],
   autofocus: 'end',
-  // 手动保存模式：不再 onUpdate 触发自动保存
-  onUpdate: () => {}
+  // 编辑后标记为待保存，由可配置的定时器统一落盘，避免每次敲键都触发 IPC。
+  onUpdate: () => {
+    if (!isLoading.value) {
+      contentRevision += 1
+      saveStatus.value = 'dirty'
+    }
+  }
 })
 
 const wordCount = computed(() => editor.value?.storage.characterCount.characters() || 0)
 
 // 保存（手动触发）
-const saveStatus = ref<'idle' | 'saving' | 'saved'>('idle')
+const saveStatus = ref<'idle' | 'dirty' | 'saving' | 'saved'>('idle')
 const isLoading = ref(false) // 加载章节时禁止保存
-const saveStatusText = computed(() => ({ idle: '', saving: '保存中...', saved: '已保存' }[saveStatus.value]))
-const saveStatusClass = computed(() => ({ idle: '', saving: 'saving', saved: 'saved' }[saveStatus.value]))
+const saveStatusText = computed(() => ({ idle: '', dirty: '待保存', saving: '保存中...', saved: '已保存' }[saveStatus.value]))
+const saveStatusClass = computed(() => ({ idle: '', dirty: 'dirty', saving: 'saving', saved: 'saved' }[saveStatus.value]))
+let autoSaveTimer: ReturnType<typeof setInterval> | null = null
+let contentRevision = 0
+
+function startAutoSave() {
+  if (autoSaveTimer) clearInterval(autoSaveTimer)
+  const seconds = Math.max(5, settings.settings?.autoSaveInterval || 30)
+  autoSaveTimer = setInterval(() => {
+    if (saveStatus.value === 'dirty') save({ silent: true })
+  }, seconds * 1000)
+}
 
 async function save(opts: { silent?: boolean } = {}) {
   if (!editor.value || !chapter.value || isLoading.value) return
+  const savingRevision = contentRevision
   saveStatus.value = 'saving'
   try {
     chapter.value.content = editor.value.getHTML()
@@ -783,8 +799,10 @@ async function save(opts: { silent?: boolean } = {}) {
     await db.Chapters.save(chapter.value)
     const idx = projectStore.chapters.findIndex(c => c.id === chapter.value!.id)
     if (idx >= 0) projectStore.chapters[idx] = { ...chapter.value }
-    saveStatus.value = 'saved'
-    setTimeout(() => { saveStatus.value = 'idle' }, 1500)
+    saveStatus.value = contentRevision === savingRevision ? 'saved' : 'dirty'
+    setTimeout(() => {
+      if (saveStatus.value === 'saved') saveStatus.value = 'idle'
+    }, 1500)
     if (!opts.silent) ElMessage.success('已保存')
   } catch (e: any) {
     saveStatus.value = 'idle'
@@ -860,6 +878,7 @@ async function loadChapter(id: string) {
     }
     chapter.value = target
     currentChapterId.value = id
+    saveStatus.value = 'idle'
     if (editor.value) {
       // false 表示不触发 onUpdate
       editor.value.commands.setContent(target.content || '', false)
@@ -1999,6 +2018,7 @@ onMounted(async () => {
       await projectStore.loadProject(route.params.id as string)
     }
     await loadChapter(currentChapterId.value)
+    startAutoSave()
     if (!aiModel.value && models.value.length > 0) {
       aiModel.value = project.value?.settings.model || settings.defaultModel() || models.value[0].model
     }
@@ -2010,6 +2030,10 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(async () => {
+  if (autoSaveTimer) {
+    clearInterval(autoSaveTimer)
+    autoSaveTimer = null
+  }
   // 切换页面前静默保存一次，避免数据丢失
   try {
     await save({ silent: true })
@@ -2445,6 +2469,7 @@ html.dark .tb-sep { background: #334155; }
   font-size: 12px;
 }
 .save-status { margin-left: auto; }
+.save-status.dirty { color: #718096; }
 .save-status.saving { color: #dd6b20; }
 .save-status.saved { color: #38a169; }
 
@@ -3163,6 +3188,7 @@ html.dark .tb-btn.active { background: rgba(59, 130, 244, 0.18); color: #93c5fd;
 
 html.dark .editor-footer { background: #1e293b; border-color: #334155; color: #cbd5e0; }
 html.dark .save-status.saving { color: #fbbf24; }
+html.dark .save-status.dirty { color: #94a3b8; }
 html.dark .save-status.saved { color: #34d399; }
 
 html.dark .chat-display { background: #0f172a; }

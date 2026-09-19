@@ -39,6 +39,12 @@ export const defaultData: DBShape = {
   settings: null
 }
 
+const ARRAY_COLLECTIONS: (keyof DBShape)[] = [
+  'projects', 'chapters', 'locations', 'lore', 'timeline', 'canvas',
+  'prompts', 'goals', 'truths', 'critiques', 'versions', 'skills',
+  'styleProfiles', 'messages'
+]
+
 let db: Awaited<ReturnType<typeof JSONFilePreset<DBShape>>> | null = null
 
 export async function initDB() {
@@ -47,11 +53,16 @@ export async function initDB() {
   if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true })
   const dbFile = path.join(dbDir, 'db.json')
   db = await JSONFilePreset<DBShape>(dbFile, defaultData)
-  // 修复老版本 db：补齐缺失的 collection（避免 .filter undefined 崩溃）
-  for (const k of Object.keys(defaultData) as (keyof DBShape)[]) {
+  // 修复老版本 db：只补齐数组集合（避免 .filter undefined 崩溃）。
+  // settings 是对象，不能与集合一起按数组初始化。
+  for (const k of ARRAY_COLLECTIONS) {
     if (!Array.isArray((db.data as any)[k])) {
       ;(db.data as any)[k] = []
     }
+  }
+  if (Array.isArray(db.data.settings) ||
+      (db.data.settings !== null && typeof db.data.settings !== 'object')) {
+    db.data.settings = null
   }
   // v1.3.8：彻底移除 characters 集合（人物库已下线）
   if (Array.isArray((db.data as any).characters)) {
@@ -156,9 +167,9 @@ export function getDB() {
 
 async function seedBuiltInPrompts() {
   if (!db) return
-  if (!db.data.prompts || db.data.prompts.length === 0) {
-    const now = Date.now()
-    db.data.prompts = [
+  if (!Array.isArray(db.data.prompts)) db.data.prompts = []
+  const now = Date.now()
+  const builtInPrompts = [
       {
         id: 'builtin-continue',
         projectId: 'global',
@@ -270,6 +281,14 @@ async function seedBuiltInPrompts() {
         updatedAt: now
       }
     ]
+  let changed = false
+  for (const prompt of builtInPrompts) {
+    if (!db.data.prompts.some((item: any) => item.id === prompt.id)) {
+      db.data.prompts.push(prompt)
+      changed = true
+    }
+  }
+  if (changed) {
     await db.write()
   }
 }
@@ -278,8 +297,6 @@ async function seedBuiltInPrompts() {
 async function seedBuiltInSkills() {
   if (!db) return
   if (!db.data.skills) db.data.skills = []
-  // 仅在首次启动（无任何技能）时种入
-  if (db.data.skills.length > 0) return
   const now = Date.now()
   const skills = [
     {
@@ -403,6 +420,12 @@ async function seedBuiltInSkills() {
       updatedAt: now
     }
   ]
-  db.data.skills = skills
-  await db.write()
+  let changed = false
+  for (const skill of skills) {
+    if (!db.data.skills.some((item: any) => item.id === skill.id)) {
+      db.data.skills.push(skill)
+      changed = true
+    }
+  }
+  if (changed) await db.write()
 }

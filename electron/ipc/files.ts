@@ -154,7 +154,7 @@ export function registerFileIPC() {
       }
 
       // 2. 解析 SKILL.md / skill.md（yaml frontmatter + body）
-      const skillMd = files.find(f => /^skill\.md$/i.test(f.name)) || files.find(f => /^SKILL\.md$/i.test(f.name))
+      const skillMd = files.find(f => /^skill\.(md|markdown)$/i.test(f.name))
       if (skillMd) {
         const parsed = parseMarkdownWithFrontmatter(skillMd.content)
         if (parsed.frontmatter.name) name = parsed.frontmatter.name
@@ -174,15 +174,15 @@ export function registerFileIPC() {
 
       // 3. system.md / system.txt 作为 systemPrompt
       if (!systemPrompt) {
-        const sysFile = files.find(f => /^system\.(md|txt)$/i.test(f.name))
+        const sysFile = files.find(f => /^system\.(md|markdown|txt)$/i.test(f.name))
         if (sysFile) systemPrompt = sysFile.content.trim()
       }
 
       // 4. prompt.md / user.md / user.txt 作为 userPrompt
       if (!userPrompt) {
         const promptFile =
-          files.find(f => /^prompt\.(md|txt)$/i.test(f.name)) ||
-          files.find(f => /^user\.(md|txt)$/i.test(f.name))
+          files.find(f => /^prompt\.(md|markdown|txt)$/i.test(f.name)) ||
+          files.find(f => /^user\.(md|markdown|txt)$/i.test(f.name))
         if (promptFile) {
           const parsed = parseMarkdownWithFrontmatter(promptFile.content)
           if (parsed.frontmatter.name && !configFile) name = parsed.frontmatter.name
@@ -194,7 +194,7 @@ export function registerFileIPC() {
 
       // 5. 兜底：任意一个 .md 文件作为 userPrompt
       if (!userPrompt) {
-        const anyMd = files.find(f => /\.md$/i.test(f.name) && !/^config\.json$/i.test(f.name))
+        const anyMd = files.find(f => /\.(md|markdown)$/i.test(f.name))
         if (anyMd) {
           const parsed = parseMarkdownWithFrontmatter(anyMd.content)
           userPrompt = parsed.body || anyMd.content

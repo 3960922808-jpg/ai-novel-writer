@@ -28,10 +28,10 @@
         <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
       </el-select>
       <el-radio-group v-model="scope" size="small">
-        <el-radio-button label="all">全部</el-radio-button>
-        <el-radio-button label="global">全局</el-radio-button>
-        <el-radio-button v-if="project" label="project">本项目</el-radio-button>
-        <el-radio-button label="builtin">内置</el-radio-button>
+        <el-radio-button value="all">全部</el-radio-button>
+        <el-radio-button value="global">全局</el-radio-button>
+        <el-radio-button v-if="project" value="project">本项目</el-radio-button>
+        <el-radio-button value="builtin">内置</el-radio-button>
       </el-radio-group>
       <span class="text-faint text-xs count-tip">共 {{ filtered.length }} / {{ skills.length }} 个</span>
     </div>
@@ -154,8 +154,8 @@
         </el-form-item>
         <el-form-item label="作用域">
           <el-radio-group v-model="editing.projectId">
-            <el-radio label="global">全局（所有项目可用）</el-radio>
-            <el-radio v-if="project" :label="project.id">仅当前项目</el-radio>
+            <el-radio value="global">全局（所有项目可用）</el-radio>
+            <el-radio v-if="project" :value="project.id">仅当前项目</el-radio>
           </el-radio-group>
         </el-form-item>
       </el-form>

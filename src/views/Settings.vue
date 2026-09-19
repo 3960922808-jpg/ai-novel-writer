@@ -14,15 +14,15 @@
 
         <el-form-item label="主题">
           <el-radio-group v-model="form.themeMode" @change="onThemeChange">
-            <el-radio-button label="light">
+            <el-radio-button value="light">
               <el-icon><Sunny /></el-icon>
               <span style="margin-left: 4px">浅色</span>
             </el-radio-button>
-            <el-radio-button label="dark">
+            <el-radio-button value="dark">
               <el-icon><Moon /></el-icon>
               <span style="margin-left: 4px">深色</span>
             </el-radio-button>
-            <el-radio-button label="auto">
+            <el-radio-button value="auto">
               <el-icon><Monitor /></el-icon>
               <span style="margin-left: 4px">跟随系统</span>
             </el-radio-button>
@@ -257,8 +257,8 @@
 
         <el-form-item label="使用厂商">
           <el-radio-group v-model="form.imageGen.provider">
-            <el-radio-button label="openai">OpenAI (gpt-image-1)</el-radio-button>
-            <el-radio-button label="google">Google Imagen</el-radio-button>
+            <el-radio-button value="openai">OpenAI (gpt-image-1)</el-radio-button>
+            <el-radio-button value="google">Google Imagen</el-radio-button>
           </el-radio-group>
         </el-form-item>
 
@@ -300,9 +300,9 @@
 
         <el-form-item label="搜索引擎">
           <el-radio-group v-model="form.searchProvider">
-            <el-radio-button label="duckduckgo">DuckDuckGo（免 Key）</el-radio-button>
-            <el-radio-button label="tavily">Tavily</el-radio-button>
-            <el-radio-button label="serper">Serper</el-radio-button>
+            <el-radio-button value="duckduckgo">DuckDuckGo（免 Key）</el-radio-button>
+            <el-radio-button value="tavily">Tavily</el-radio-button>
+            <el-radio-button value="serper">Serper</el-radio-button>
           </el-radio-group>
         </el-form-item>
 

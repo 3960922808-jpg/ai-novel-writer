@@ -35,9 +35,9 @@
           <el-option label="暂停" value="暂停" />
         </el-select>
         <el-radio-group v-model="sortBy" size="small">
-          <el-radio-button label="updated">最近更新</el-radio-button>
-          <el-radio-button label="created">创建时间</el-radio-button>
-          <el-radio-button label="title">书名</el-radio-button>
+          <el-radio-button value="updated">最近更新</el-radio-button>
+          <el-radio-button value="created">创建时间</el-radio-button>
+          <el-radio-button value="title">书名</el-radio-button>
         </el-radio-group>
       </div>
       <div class="count-tip text-faint text-xs">
@@ -219,8 +219,13 @@ onMounted(load)
 
 async function load() {
   loading.value = true
-  projects.value = await db.listProjects()
-  loading.value = false
+  try {
+    projects.value = await db.listProjects()
+  } catch (e: any) {
+    ElMessage.error('加载书架失败：' + (e?.message || '未知错误'))
+  } finally {
+    loading.value = false
+  }
 }
 
 function open(id: string) {
