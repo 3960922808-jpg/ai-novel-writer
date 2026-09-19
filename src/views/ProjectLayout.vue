@@ -52,7 +52,7 @@ import {
   EditPen, DataAnalysis, Document, Edit, User,
   Location, Collection, Timer, Connection,
   MagicStick, Trophy, ChatLineSquare, Files, Download, Setting, Fold, Expand,
-  CopyDocument, Reading, Link, ChatDotRound, TrendCharts
+  CopyDocument, Reading, Link, ChatDotRound, TrendCharts, Operation
 } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { ElMessage } from 'element-plus'
@@ -77,6 +77,7 @@ const navItems = [
   { name: 'chat', label: '设定对话', icon: ChatDotRound },
   { name: 'skills', label: '技能库', icon: MagicStick },
   { name: 'distill', label: '蒸馏文风', icon: CopyDocument },
+  { name: 'text-tools', label: '文本工具箱', icon: Operation },
   { name: 'prompts', label: '提示词库', icon: EditPen },
   { name: 'goals', label: '写作目标', icon: Trophy },
   { name: 'critics', label: 'AI 评审', icon: ChatLineSquare },

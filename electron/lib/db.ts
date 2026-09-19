@@ -251,6 +251,17 @@ async function seedBuiltInPrompts() {
         updatedAt: now
       },
       {
+        id: 'builtin-condense',
+        projectId: 'global',
+        category: '缩写',
+        title: '小说文本压缩',
+        content: '请把以下小说正文压缩到原长度的 {{ratio}}%。严格保留人物、因果、关键动作、重要信息、伏笔和转折，不得新增事实；删去重复说明、同义反复、无效铺陈和不推动情节的句子。尽量保持原有叙事视角与语言风格，直接输出压缩后的正文，不要解释：\n\n{{content}}',
+        variables: ['ratio', 'content'],
+        isBuiltIn: true,
+        createdAt: now,
+        updatedAt: now
+      },
+      {
         id: 'builtin-outline',
         projectId: 'global',
         category: '大纲',
@@ -329,6 +340,11 @@ async function seedBuiltInPrompts() {
   }
 }
 
+export function getDBFilePath() {
+  if (!dbFilePath) throw new Error('DB not initialized')
+  return dbFilePath
+}
+
 /** 内置技能：比 prompt 更高级，包含 system + user 双模板与推荐参数 */
 async function seedBuiltInSkills() {
   if (!db) return
@@ -351,6 +367,26 @@ async function seedBuiltInSkills() {
       temperature: 0.7,
       maxTokens: 2048,
       tags: ['润色', '去AI味'],
+      isBuiltIn: true,
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: 'skill-novel-condense',
+      projectId: 'global',
+      name: '小说文本压缩',
+      description: '按指定比例压缩小说正文，保留人物关系、因果链、伏笔、转折和必要对话',
+      category: '缩写',
+      icon: 'Fold',
+      systemPrompt:
+        '你是小说压缩编辑。你必须在缩短篇幅的同时守住故事事实、人物关系、因果链、关键动作、伏笔和转折，不得添加原文没有的信息。删去同义反复、无效铺陈、重复心理说明和不推动情节的句子。只输出压缩后的正文。',
+      userPrompt:
+        '请将下列正文压缩到原长度的 {{ratio}}%，并尽量保持原文叙事视角与语言风格：\n\n{{content}}',
+      variables: ['ratio', 'content'],
+      recommendedModel: '',
+      temperature: 0.35,
+      maxTokens: 4096,
+      tags: ['缩写', '压缩', '精简'],
       isBuiltIn: true,
       createdAt: now,
       updatedAt: now

@@ -88,6 +88,12 @@ const api = {
     readSkillFolder: (folderPath: string) => ipcRenderer.invoke('file:read-skill-folder', folderPath)
   },
 
+  // ====== 创作数据备份 ======
+  backup: {
+    exportData: (includeSecrets = false) => ipcRenderer.invoke('backup:export', includeSecrets),
+    importData: () => ipcRenderer.invoke('backup:import')
+  },
+
   // ====== Obsidian 长期记忆 ======
   obsidian: {
     chooseVault: () => ipcRenderer.invoke('obsidian:choose-vault'),

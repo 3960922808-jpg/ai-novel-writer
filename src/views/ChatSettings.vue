@@ -96,6 +96,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useWebSearch } from '@/composables/useWebSearch'
 import * as aiSvc from '@/services/ai'
 import * as db from '@/services/db'
+import { buildConversationWithCompression } from '@/services/conversation'
 import { renderSafeMarkdown } from '@/services/markdown'
 import type { CanvasNode } from '@/types'
 
@@ -162,17 +163,7 @@ async function pushMsg(msg: Omit<ChatMsg, 'id'>): Promise<boolean> {
 }
 
 function recentConversationForAI(limitChars = 80_000) {
-  const selected: Array<{ role: 'user' | 'assistant'; content: string }> = []
-  let total = 0
-  for (let i = messages.value.length - 1; i >= 0; i--) {
-    const message = messages.value[i]
-    const size = message.content.length
-    if (selected.length > 0 && total + size > limitChars) break
-    selected.push({ role: message.role, content: message.content })
-    total += size
-    if (selected.length >= 30) break
-  }
-  return selected.reverse()
+  return buildConversationWithCompression(messages.value, limitChars, 30, 4_000)
 }
 
 async function refreshHistorySessions() {

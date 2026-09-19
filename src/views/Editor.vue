@@ -595,7 +595,7 @@ import { useProjectStore } from '@/stores/project'
 import { useSettingsStore } from '@/stores/settings'
 import * as db from '@/services/db'
 import * as aiSvc from '@/services/ai'
-import { buildConversationForAI, editorSessionChapterId } from '@/services/conversation'
+import { buildConversationForAI, buildConversationWithCompression, editorSessionChapterId } from '@/services/conversation'
 import { Skills as SkillsDB } from '@/services/db'
 import { useWebSearch } from '@/composables/useWebSearch'
 import type { Chapter, Prompt, Skill, CanvasNode, TimelineEvent, TruthFile } from '@/types'
@@ -1669,7 +1669,7 @@ async function sendChat() {
 
   if (searchCtx) sysContent += '\n\n' + searchCtx
 
-  const priorConversation = buildConversationForAI(chatMessages.value)
+  const priorConversation = buildConversationWithCompression(chatMessages.value)
   const contextSnapshot = linkedItems.value.map(item => ({ ...item }))
   const savedUser = await pushMsg({
     role: 'user',

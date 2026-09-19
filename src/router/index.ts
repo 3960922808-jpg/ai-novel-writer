@@ -42,6 +42,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'obsidian', name: 'obsidian', component: () => import('@/views/ObsidianMemory.vue'), meta: { title: 'Obsidian 记忆' } },
       { path: 'skills', name: 'skills', component: () => import('@/views/Skills.vue'), meta: { title: '技能库' } },
       { path: 'distill', name: 'distill', component: () => import('@/views/DistillNovel.vue'), meta: { title: '蒸馏文风' } },
+      { path: 'text-tools', name: 'text-tools', component: () => import('@/views/TextTools.vue'), meta: { title: '文本工具箱' } },
       { path: 'export', name: 'export', component: () => import('@/views/Export.vue'), meta: { title: '导出' } },
       { path: 'project-settings', name: 'project-settings', component: () => import('@/views/ProjectSettings.vue'), meta: { title: '项目设置' } }
     ]

@@ -431,6 +431,15 @@
         <el-form-item label="数据目录">
           <el-input v-model="form.dataDir" readonly />
         </el-form-item>
+
+        <el-form-item label="创作数据备份">
+          <div class="backup-actions">
+            <el-checkbox v-model="backupIncludesSecrets">备份接口密钥</el-checkbox>
+            <el-button :icon="Download" :loading="backingUp" @click="exportBackup">导出完整备份</el-button>
+            <el-button :icon="Upload" :loading="restoringBackup" @click="importBackup">从备份恢复</el-button>
+            <span class="text-faint text-xs">默认不包含接口密钥；恢复前会自动保存当前数据库副本</span>
+          </div>
+        </el-form-item>
       </div>
 
       <div class="card section-card">
@@ -475,10 +484,10 @@
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, watch, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowLeft, ArrowDown, Check, Plus, Sunny, Moon, Refresh, Monitor, Link,
-  Connection, Delete, CircleCheck, CircleClose, InfoFilled, Upload, Picture
+  Connection, Delete, CircleCheck, CircleClose, InfoFilled, Upload, Download, Picture
 } from '@element-plus/icons-vue'
 import { useSettingsStore } from '@/stores/settings'
 import type { AppSettings } from '@/types'
@@ -488,6 +497,45 @@ const settingsStore = useSettingsStore()
 
 const loading = ref(false)
 const saving = ref(false)
+const backingUp = ref(false)
+const restoringBackup = ref(false)
+const backupIncludesSecrets = ref(false)
+
+async function exportBackup() {
+  backingUp.value = true
+  try {
+    if (backupIncludesSecrets.value) {
+      await ElMessageBox.confirm('备份将包含接口密钥。请只保存到可信位置，不要上传或分享给他人。', '包含敏感信息', {
+        confirmButtonText: '继续导出', cancelButtonText: '取消', type: 'warning'
+      })
+    }
+    const result = await window.api.backup.exportData(backupIncludesSecrets.value)
+    if (result?.filePath) ElMessage.success('创作数据备份已导出')
+  } catch (error: any) {
+    if (error === 'cancel' || error === 'close') return
+    ElMessage.error(`备份失败：${error?.message || error}`)
+  } finally {
+    backingUp.value = false
+  }
+}
+
+async function importBackup() {
+  try {
+    await ElMessageBox.confirm('恢复操作会用备份内容替换当前全部项目、章节、对话、技能和设置。当前数据库会自动保留一份恢复前副本。', '确认恢复备份', {
+      confirmButtonText: '选择备份并恢复', cancelButtonText: '取消', type: 'warning'
+    })
+    restoringBackup.value = true
+    const result = await window.api.backup.importData()
+    if (!result) return
+    await ElMessageBox.alert(`已恢复 ${result.projects} 个项目、${result.chapters} 个章节。软件界面将重新载入。`, '恢复完成', { type: 'success' })
+    window.location.reload()
+  } catch (error: any) {
+    if (error === 'cancel' || error === 'close') return
+    ElMessage.error(`恢复失败：${error?.message || error}`)
+  } finally {
+    restoringBackup.value = false
+  }
+}
 
 const form = reactive<AppSettings>({
   defaultModel: '',
@@ -1177,6 +1225,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.backup-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;width:100%}
 .settings-page {
   height: 100vh;
   overflow: auto;

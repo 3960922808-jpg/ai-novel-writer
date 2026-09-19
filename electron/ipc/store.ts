@@ -119,6 +119,10 @@ export function registerStoreIPC() {
     const db = getDB()
     const arr = (db.data as any)[collection] as any[]
     if (!arr) return []
+    // 版本快照没有 projectId，以 chapterId 作为查询键。
+    if (collection === 'versions') {
+      return arr.filter(x => x.chapterId === projectId).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    }
     // 支持全局 + 项目级
     if (collection === 'prompts' || collection === 'skills' || collection === 'styleProfiles') {
       return arr.filter(x => x.projectId === 'global' || x.projectId === projectId)
