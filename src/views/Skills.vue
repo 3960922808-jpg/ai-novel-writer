@@ -339,11 +339,15 @@ async function saveSkill() {
 async function removeSkill(s: Skill) {
   try {
     await ElMessageBox.confirm(`确定删除技能「${s.name}」？`, '删除确认', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
     await SkillsDB.remove(s.id)
     skills.value = skills.value.filter((x) => x.id !== s.id)
     ElMessage.success('已删除')
-  } catch {
-    // cancel
+  } catch (e: any) {
+    ElMessage.error('删除失败：' + (e?.message || '未知错误'))
   }
 }
 

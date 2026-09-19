@@ -641,25 +641,12 @@ async function testConnection(idx: number) {
   testingIdx.value = idx
   const t0 = performance.now()
   try {
-    const url = p.baseUrl.replace(/\/+$/, '') + '/models'
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (p.apiKey) headers['Authorization'] = `Bearer ${p.apiKey}`
-    const res = await fetch(url, { method: 'GET', headers })
+    const data = await window.api.ai.listModels({ baseUrl: p.baseUrl, apiKey: p.apiKey })
     const latency = Math.round(performance.now() - t0)
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      testResults.value[idx] = {
-        ok: false,
-        latency,
-        msg: `HTTP ${res.status} ${res.statusText}${text ? ' · ' + text.slice(0, 80) : ''}`
-      }
-      return
-    }
-    const data = await res.json()
-    const models: any[] = data?.data || data?.models || []
+    const models: string[] = data?.models || []
     if (models.length > 0) {
       // 自动填充模型列表
-      const ids: string[] = models.map((m: any) => m.id || m.name || m).filter(Boolean)
+      const ids = models
       const newIds = ids.filter(id => !p.models.includes(id))
       if (newIds.length > 0) p.models.push(...newIds)
       testResults.value[idx] = {

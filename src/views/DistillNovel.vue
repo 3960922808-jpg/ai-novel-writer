@@ -601,11 +601,15 @@ async function applyProfileToProject(p: StyleProfile) {
 async function deleteProfile(p: StyleProfile) {
   try {
     await ElMessageBox.confirm(`确定删除档案「${p.name}」？`, '删除确认', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
     await StyleProfiles.remove(p.id)
     profiles.value = profiles.value.filter((x) => x.id !== p.id)
     ElMessage.success('已删除')
-  } catch {
-    // cancel
+  } catch (e: any) {
+    ElMessage.error('删除失败：' + (e?.message || '未知错误'))
   }
 }
 

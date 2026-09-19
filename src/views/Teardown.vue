@@ -139,7 +139,7 @@ import {
 import { useProjectStore } from '@/stores/project'
 import { useSettingsStore } from '@/stores/settings'
 import * as ai from '@/services/ai'
-import { marked } from 'marked'
+import { renderSafeMarkdown } from '@/services/markdown'
 
 const projectStore = useProjectStore()
 const settings = useSettingsStore()
@@ -348,11 +348,7 @@ function loadHistory(r: TeardownRecord) {
 }
 
 function renderMarkdown(md: string): string {
-  try {
-    return marked.parse(md || '', { async: false }) as string
-  } catch {
-    return (md || '').replace(/\n/g, '<br>')
-  }
+  return renderSafeMarkdown(md)
 }
 
 function exportMarkdown() {

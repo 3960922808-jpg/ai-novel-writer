@@ -88,12 +88,12 @@ import { ref, computed, nextTick, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ChatDotRound, Delete, DocumentCopy, Promotion, VideoPause, Loading, Cloudy, Clock, Plus, Link, RefreshRight } from '@element-plus/icons-vue'
-import { marked } from 'marked'
 import { useProjectStore } from '@/stores/project'
 import { useSettingsStore } from '@/stores/settings'
 import { useWebSearch } from '@/composables/useWebSearch'
 import * as aiSvc from '@/services/ai'
 import * as db from '@/services/db'
+import { renderSafeMarkdown } from '@/services/markdown'
 import type { CanvasNode } from '@/types'
 
 const LEGACY_SETTINGS_SESSION = 'settings'
@@ -240,10 +240,8 @@ function formatTime(time: number) {
 }
 function getProvider() { return settings.findProviderForModel(aiModel.value || project.value?.settings.model || '') }
 function renderMarkdown(text: string) {
-  if (!text) return ''
-  try { return marked.parse(text, { breaks: true, async: false }) as string } catch { return escapeHtml(text).replace(/\n/g, '<br>') }
+  return renderSafeMarkdown(text)
 }
-function escapeHtml(s: string) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }
 function copyText(text: string) { navigator.clipboard.writeText(text); ElMessage.success('已复制') }
 async function deleteMsg(id: string) {
   const idx = messages.value.findIndex(m => m.id === id)

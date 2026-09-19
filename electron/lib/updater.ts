@@ -17,11 +17,12 @@
  * - 超时：8 秒 AbortController，避免长时间挂起
  */
 import { app, BrowserWindow, Notification, shell } from 'electron'
-import { getDB } from './db'
+import { getDB, writeDB } from './db'
 import fs from 'node:fs'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 
 const REPO = '3960922808-jpg/ai-novel-writer'
 // 多个 GitHub API 镜像源（依次尝试，提高国内访问成功率）
@@ -65,6 +66,59 @@ interface GitHubRelease {
   }>
 }
 
+function isTrustedReleasePage(release: GitHubRelease): boolean {
+  try {
+    const url = new URL(release.html_url)
+    const prefix = `/${REPO}/releases/tag/`
+    return url.protocol === 'https:' && url.hostname === 'github.com' &&
+      url.pathname.startsWith(prefix) &&
+      decodeURIComponent(url.pathname.slice(prefix.length)) === release.tag_name
+  } catch {
+    return false
+  }
+}
+
+function validateRelease(data: unknown): GitHubRelease {
+  if (!data || typeof data !== 'object') throw new Error('更新接口返回格式无效')
+  const release = data as GitHubRelease
+  if (typeof release.tag_name !== 'string' || !/^v?\d+(?:\.\d+){1,3}(?:[-+][a-z0-9.-]+)?$/i.test(release.tag_name)) {
+    throw new Error('更新版本号格式无效')
+  }
+  if (!isTrustedReleasePage(release)) throw new Error('更新发布页地址不可信')
+  if (!Array.isArray(release.assets) || release.assets.length > 100) throw new Error('更新文件列表格式无效')
+  for (const asset of release.assets) {
+    if (!asset || typeof asset.name !== 'string' || asset.name.length > 255 ||
+      !Number.isSafeInteger(asset.size) || asset.size < 0 || typeof asset.browser_download_url !== 'string') {
+      throw new Error('更新文件信息格式无效')
+    }
+  }
+  release.name = typeof release.name === 'string' ? release.name.slice(0, 500) : release.tag_name
+  release.body = typeof release.body === 'string' ? release.body.slice(0, 100_000) : ''
+  release.published_at = typeof release.published_at === 'string' ? release.published_at : ''
+  return release
+}
+
+async function readResponseText(response: Response, maxBytes: number): Promise<string> {
+  const declared = Number(response.headers.get('content-length') || 0)
+  if (declared > maxBytes) throw new Error('更新接口响应异常过大')
+  if (!response.body) return ''
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let total = 0
+  let output = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {})
+      throw new Error('更新接口响应异常过大')
+    }
+    output += decoder.decode(value, { stream: true })
+  }
+  return output + decoder.decode()
+}
+
 // 直接使用 Electron 的应用版本，避免 ESM 构建产物中不存在 __dirname。
 function getLocalVersion(): string {
   try {
@@ -98,22 +152,26 @@ async function fetchLatestRelease(): Promise<GitHubRelease | null> {
     try {
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
-      const res = await fetch(url, {
-        headers: {
-          'Accept': 'application/vnd.github+json',
-          'User-Agent': 'ai-novel-writer-updater'
-        },
-        signal: controller.signal
-      })
-      clearTimeout(timeout)
-      if (res.status === 404) return null // 还没有 release
-      if (!res.ok) {
-        lastErr = new Error(`GitHub API ${res.status} (${url})`)
-        continue
+      try {
+        const res = await fetch(url, {
+          headers: {
+            'Accept': 'application/vnd.github+json',
+            'User-Agent': 'ai-novel-writer-updater'
+          },
+          signal: controller.signal
+        })
+        if (res.status === 404) return null // 还没有 release
+        if (!res.ok) {
+          lastErr = new Error(`GitHub API ${res.status} (${url})`)
+          continue
+        }
+        const text = await readResponseText(res, 5 * 1024 * 1024)
+        const data = validateRelease(JSON.parse(text))
+        console.log(`[updater] 成功从 ${url} 获取最新 release`)
+        return data
+      } finally {
+        clearTimeout(timeout)
       }
-      const data = await res.json() as GitHubRelease
-      console.log(`[updater] 成功从 ${url} 获取最新 release`)
-      return data
     } catch (e: any) {
       lastErr = e
       console.warn(`[updater] ${url} 失败:`, e?.message || e)
@@ -136,7 +194,7 @@ function persistVersion(version: string) {
   const db = getDB()
   if (!db.data.settings) db.data.settings = {} as any
   ;(db.data.settings as any).lastKnownVersion = version
-  db.write().catch(err => console.error('[updater] 写入版本号失败:', err))
+  writeDB().catch(err => console.error('[updater] 写入版本号失败:', err))
 }
 
 function firstLine(msg: string): string {
@@ -180,17 +238,62 @@ function notifyUpdate(release: GitHubRelease) {
  * 选择要下载的资产：
  * 只选 Setup.exe（NSIS 安装版），用于静默覆盖安装。
  * 不再下载 zip 免安装包（无法自动覆盖当前运行中的 exe）。
- * 如果没有 exe 资产，回退到第一个资产（让用户手动处理）。
+ * 如果没有 exe 资产，则只允许打开可信发布页供用户手动处理。
  */
 function pickAsset(assets: GitHubRelease['assets']): GitHubRelease['assets'][number] | null {
   if (!assets || !assets.length) return null
-  // 优先匹配 Setup.exe / NSIS 安装包
-  const exe = assets.find(a =>
+  // 自动更新只接受明确的 Setup.exe / NSIS 安装包，不执行模糊匹配到的文件。
+  return assets.find(a =>
     /\.exe$/i.test(a.name) && /setup|installer|install/i.test(a.name)
-  ) || assets.find(a => /\.exe$/i.test(a.name))
-  if (exe) return exe
-  // 回退到第一个
-  return assets[0]
+  ) || null
+}
+
+function isTrustedReleaseAsset(release: GitHubRelease, asset: GitHubRelease['assets'][number]): boolean {
+  try {
+    const url = new URL(asset.browser_download_url)
+    const expectedPrefix = `/${REPO}/releases/download/${encodeURIComponent(release.tag_name)}/`
+    return url.protocol === 'https:' && url.hostname === 'github.com' &&
+      decodeURIComponent(url.pathname).startsWith(decodeURIComponent(expectedPrefix)) &&
+      path.basename(asset.name) === asset.name
+  } catch {
+    return false
+  }
+}
+
+async function fetchExpectedChecksum(release: GitHubRelease, assetName: string): Promise<string> {
+  const checksumAsset = release.assets.find(item => item.name === 'SHA256SUMS.txt')
+  if (!checksumAsset || !isTrustedReleaseAsset(release, checksumAsset)) {
+    throw new Error('该版本缺少可信的 SHA256SUMS.txt，已阻止自动安装')
+  }
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 15_000)
+  try {
+    const response = await fetch(checksumAsset.browser_download_url, {
+      headers: { 'User-Agent': 'ai-novel-writer-updater', Accept: 'text/plain' },
+      redirect: 'follow',
+      signal: controller.signal
+    })
+    if (!response.ok) throw new Error(`校验文件下载失败：HTTP ${response.status}`)
+    const text = await readResponseText(response, 1024 * 1024)
+    for (const line of text.split(/\r?\n/)) {
+      const match = line.trim().match(/^([a-f0-9]{64})\s+\*?(.+)$/i)
+      if (match && match[2].trim() === assetName) return match[1].toLowerCase()
+    }
+    throw new Error(`校验文件中没有 ${assetName} 的哈希值`)
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function sha256File(filePath: string): Promise<string> {
+  const hash = createHash('sha256')
+  await new Promise<void>((resolve, reject) => {
+    const stream = fs.createReadStream(filePath)
+    stream.on('data', chunk => hash.update(chunk))
+    stream.on('end', resolve)
+    stream.on('error', reject)
+  })
+  return hash.digest('hex')
 }
 
 function buildPayload(release: GitHubRelease) {
@@ -255,6 +358,7 @@ async function checkOnce(opts: { silent?: boolean } = {}): Promise<{ updated: bo
 export async function downloadAndRestart(): Promise<{ success: boolean; error?: string }> {
   if (isDownloading) return { success: false, error: '正在下载中' }
   isDownloading = true
+  let partialPath = ''
   const wins = BrowserWindow.getAllWindows()
 
   const sendProgress = (pct: number, status: string) => {
@@ -273,6 +377,8 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
     if (!release) throw new Error('未找到任何发布版本')
     const asset = pickAsset(release.assets)
     if (!asset) throw new Error('该版本未上传可下载的文件')
+    if (!isTrustedReleaseAsset(release, asset)) throw new Error('更新文件地址不可信，已阻止自动安装')
+    const expectedChecksum = await fetchExpectedChecksum(release, asset.name)
 
     sendProgress(5, `正在下载 ${asset.name}（${(asset.size / 1024 / 1024).toFixed(2)} MB）...`)
 
@@ -280,6 +386,8 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
     const cacheDir = path.join(app.getPath('userData'), 'update-cache')
     if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
     const savePath = path.join(cacheDir, asset.name)
+    partialPath = `${savePath}.part`
+    if (fs.existsSync(partialPath)) fs.rmSync(partialPath, { force: true })
 
     // 构造多个下载源（直链优先 → ghproxy 加速）
     const downloadUrls = DOWNLOAD_PROXIES.map(p => p + asset.browser_download_url)
@@ -293,27 +401,30 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
         sendProgress(8, `正在连接下载源...`)
         const controller = new AbortController()
         const timeout = setTimeout(() => controller.abort(), 15_000) // 连接超时 15 秒
-        const r = await fetch(url, {
-          headers: {
-            'User-Agent': 'ai-novel-writer-updater',
-            'Accept': 'application/octet-stream'
-          },
-          redirect: 'follow',
-          signal: controller.signal
-        })
-        clearTimeout(timeout)
-        if (!r.ok) {
-          lastErr = new Error(`HTTP ${r.status}`)
-          continue
+        try {
+          const r = await fetch(url, {
+            headers: {
+              'User-Agent': 'ai-novel-writer-updater',
+              'Accept': 'application/octet-stream'
+            },
+            redirect: 'follow',
+            signal: controller.signal
+          })
+          if (!r.ok) {
+            lastErr = new Error(`HTTP ${r.status}`)
+            continue
+          }
+          if (!r.body) {
+            lastErr = new Error('无响应体')
+            continue
+          }
+          resp = r
+          usedUrl = url
+          console.log(`[updater] 下载源选择: ${url}`)
+          break
+        } finally {
+          clearTimeout(timeout)
         }
-        if (!r.body) {
-          lastErr = new Error('无响应体')
-          continue
-        }
-        resp = r
-        usedUrl = url
-        console.log(`[updater] 下载源选择: ${url}`)
-        break
       } catch (e: any) {
         lastErr = e
         console.warn(`[updater] 下载源 ${url} 连接失败:`, e?.message || e)
@@ -329,7 +440,7 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
     sendProgress(10, `开始下载（共 ${(total / 1024 / 1024).toFixed(2)} MB）...`)
 
     // Node stream 写入文件
-    const fileStream = fs.createWriteStream(savePath)
+    const fileStream = fs.createWriteStream(partialPath, { flags: 'w' })
     const reader = Readable.fromWeb(resp.body as any)
 
     let received = 0
@@ -385,10 +496,14 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
     })
 
     // 验证文件大小
-    const stat = fs.statSync(savePath)
-    if (stat.size < 1000) {
-      throw new Error('下载文件过小，可能不是有效的安装包')
-    }
+    const stat = fs.statSync(partialPath)
+    if (stat.size !== asset.size) throw new Error(`下载文件大小不匹配：应为 ${asset.size}，实际为 ${stat.size}`)
+    sendProgress(96, '正在校验安装包完整性...')
+    const actualChecksum = await sha256File(partialPath)
+    if (actualChecksum !== expectedChecksum) throw new Error('安装包 SHA-256 校验失败，文件可能损坏或被篡改')
+    if (fs.existsSync(savePath)) fs.rmSync(savePath, { force: true })
+    fs.renameSync(partialPath, savePath)
+    partialPath = ''
 
     // 安装包：用 NSIS /S 静默安装，自动覆盖旧文件
     if (/\.exe$/i.test(asset.name)) {
@@ -422,6 +537,9 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
     shell.showItemInFolder(savePath)
     return { success: true }
   } catch (e: any) {
+    if (partialPath && fs.existsSync(partialPath)) {
+      try { fs.rmSync(partialPath, { force: true }) } catch {}
+    }
     console.error('[updater] 下载失败:', e)
     const errMsg = e?.name === 'AbortError'
       ? '连接超时，请检查网络后重试'
@@ -486,6 +604,7 @@ export async function openDownloadInBrowser(): Promise<{
     const asset = pickAsset(release.assets)
     if (!asset || !asset.browser_download_url) {
       // 没有 exe 资产，直接打开发布页让用户自己挑
+      if (!isTrustedReleasePage(release)) throw new Error('发布页地址不可信')
       await shell.openExternal(release.html_url)
       return {
         success: true,
@@ -494,6 +613,7 @@ export async function openDownloadInBrowser(): Promise<{
       }
     }
     // 用系统默认浏览器打开下载链接
+    if (!isTrustedReleaseAsset(release, asset)) throw new Error('下载地址不可信')
     await shell.openExternal(asset.browser_download_url)
     return {
       success: true,

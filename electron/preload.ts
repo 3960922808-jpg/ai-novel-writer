@@ -43,6 +43,7 @@ const api = {
 
   // ====== AI 调用 ======
   ai: {
+    listModels: (req: { baseUrl: string; apiKey?: string }) => ipcRenderer.invoke('ai:list-models', req),
     // 流式聊天，回调返回每个 chunk
     // 返回 { promise, cancel }：cancel() 可中止主进程 fetch
     stream: (req: any, onChunk: (text: string) => void) => {

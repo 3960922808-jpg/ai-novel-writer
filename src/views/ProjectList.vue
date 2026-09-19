@@ -317,16 +317,23 @@ async function applyTemplate(pid: string, template: string, genre: string, title
   } as any)
 }
 
-function confirmDelete(p: Project) {
-  ElMessageBox.confirm(`确定删除《${p.title}》？所有章节、设定将一并删除，且无法恢复。`, '删除确认', {
-    type: 'warning',
-    confirmButtonText: '删除',
-    cancelButtonText: '取消'
-  }).then(async () => {
+async function confirmDelete(p: Project) {
+  try {
+    await ElMessageBox.confirm(`确定删除《${p.title}》？所有章节、设定将一并删除，且无法恢复。`, '删除确认', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消'
+    })
+  } catch {
+    return
+  }
+  try {
     await db.deleteProject(p.id)
     ElMessage.success('已删除')
-    load()
-  }).catch(() => {})
+    await load()
+  } catch (e: any) {
+    ElMessage.error('删除失败：' + (e?.message || '未知错误'))
+  }
 }
 
 function exportProject(p: Project) {

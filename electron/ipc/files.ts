@@ -1,6 +1,60 @@
 import { ipcMain, dialog } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import JSZip from 'jszip'
+
+const MAX_IMAGE_BYTES = 25 * 1024 * 1024
+const MAX_NOVEL_BYTES = 25 * 1024 * 1024
+const MAX_DOCX_XML_BYTES = 20 * 1024 * 1024
+const MAX_SKILL_FILE_BYTES = 2 * 1024 * 1024
+const MAX_SKILL_TOTAL_BYTES = 10 * 1024 * 1024
+const MAX_SKILL_FILES = 64
+const approvedFiles = new Set<string>()
+const approvedFolders = new Set<string>()
+
+function pathKey(value: string): string {
+  const resolved = path.resolve(value)
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+}
+
+async function approveFile(value: string) {
+  approvedFiles.add(pathKey(value))
+  try { approvedFiles.add(pathKey(await fs.realpath(value))) } catch {}
+}
+
+async function approveFolder(value: string) {
+  approvedFolders.add(pathKey(value))
+  try { approvedFolders.add(pathKey(await fs.realpath(value))) } catch {}
+}
+
+async function requireApprovedFile(value: unknown): Promise<string> {
+  if (typeof value !== 'string' || !value) throw new Error('文件路径无效')
+  const resolved = path.resolve(value)
+  let real = resolved
+  try { real = await fs.realpath(resolved) } catch { throw new Error('文件不存在或无法访问') }
+  if (!approvedFiles.has(pathKey(resolved)) && !approvedFiles.has(pathKey(real))) {
+    throw new Error('只能读取刚刚通过文件选择器授权的文件')
+  }
+  return real
+}
+
+async function requireApprovedFolder(value: unknown): Promise<string> {
+  if (typeof value !== 'string' || !value) throw new Error('文件夹路径无效')
+  const resolved = path.resolve(value)
+  let real = resolved
+  try { real = await fs.realpath(resolved) } catch { throw new Error('文件夹不存在或无法访问') }
+  if (!approvedFolders.has(pathKey(resolved)) && !approvedFolders.has(pathKey(real))) {
+    throw new Error('只能读取刚刚通过文件夹选择器授权的目录')
+  }
+  return real
+}
+
+async function assertFileSize(filePath: string, maxBytes: number, label: string) {
+  const stat = await fs.stat(filePath)
+  if (!stat.isFile()) throw new Error(`${label}不是普通文件`)
+  if (stat.size > maxBytes) throw new Error(`${label}超过 ${(maxBytes / 1024 / 1024).toFixed(0)} MB 限制`)
+  return stat
+}
 
 export function registerFileIPC() {
   ipcMain.handle('file:select-image', async () => {
@@ -11,14 +65,17 @@ export function registerFileIPC() {
         filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }]
       })
       if (r.canceled || r.filePaths.length === 0) return null
+      await approveFile(r.filePaths[0])
       return r.filePaths[0]
     } catch (e: any) {
       throw new Error('选择图片失败：' + e.message)
     }
   })
 
-  ipcMain.handle('file:read-image', async (_e, filePath: string) => {
+  ipcMain.handle('file:read-image', async (_e, inputPath: string) => {
     try {
+      const filePath = await requireApprovedFile(inputPath)
+      await assertFileSize(filePath, MAX_IMAGE_BYTES, '图片')
       const buf = await fs.readFile(filePath)
       const ext = filePath.split('.').pop()?.toLowerCase() || 'png'
       const map: Record<string, string> = { jpg: 'jpeg', jpeg: 'jpeg', png: 'png', webp: 'webp', gif: 'gif' }
@@ -40,6 +97,7 @@ export function registerFileIPC() {
         ]
       })
       if (r.canceled || r.filePaths.length === 0) return []
+      await Promise.all(r.filePaths.map(approveFile))
       return r.filePaths
     } catch (e: any) {
       throw new Error('选择文件失败：' + e.message)
@@ -54,6 +112,7 @@ export function registerFileIPC() {
         properties: ['openDirectory']
       })
       if (r.canceled || r.filePaths.length === 0) return null
+      await approveFolder(r.filePaths[0])
       return r.filePaths[0]
     } catch (e: any) {
       throw new Error('选择文件夹失败：' + e.message)
@@ -61,8 +120,10 @@ export function registerFileIPC() {
   })
 
   // 读取小说文件文本内容
-  ipcMain.handle('file:read-novel', async (_e, filePath: string) => {
+  ipcMain.handle('file:read-novel', async (_e, inputPath: string) => {
     try {
+      const filePath = await requireApprovedFile(inputPath)
+      const stat = await assertFileSize(filePath, MAX_NOVEL_BYTES, '小说文件')
       const ext = path.extname(filePath).toLowerCase().replace(/^\./, '')
       if (ext === 'txt' || ext === 'md' || ext === 'markdown') {
         const buf = await fs.readFile(filePath)
@@ -78,12 +139,12 @@ export function registerFileIPC() {
         } catch {
           text = buf.toString('utf-8')
         }
-        return { fileName: path.basename(filePath), ext, content: text, size: buf.length }
+        return { fileName: path.basename(filePath), ext, content: text, size: stat.size }
       }
       if (ext === 'docx') {
         // 解析 docx：使用 mammoth 不现实（依赖大），改用 ZIP 解包 + 简易 XML 解析
         const text = await extractDocxText(filePath)
-        return { fileName: path.basename(filePath), ext, content: text, size: text.length }
+        return { fileName: path.basename(filePath), ext, content: text, size: stat.size }
       }
       throw new Error('暂不支持的文件格式：' + ext)
     } catch (e: any) {
@@ -98,17 +159,27 @@ export function registerFileIPC() {
   //   3) skill/config.json + skill/prompt.md —— 配置 + 提示词
   //   4) skill/任意.md —— 找一个 .md 文件作为 userPrompt
   // 返回 { name, description, systemPrompt, userPrompt, files: [{name, content}] }
-  ipcMain.handle('file:read-skill-folder', async (_e, folderPath: string) => {
+  ipcMain.handle('file:read-skill-folder', async (_e, inputFolderPath: string) => {
     try {
+      const folderPath = await requireApprovedFolder(inputFolderPath)
       const entries = await fs.readdir(folderPath, { withFileTypes: true })
       const files: { name: string; path: string; content: string }[] = []
+      let totalBytes = 0
       for (const entry of entries) {
+        if (files.length >= MAX_SKILL_FILES) break
         if (entry.isFile()) {
           const ext = path.extname(entry.name).toLowerCase()
           if (['.md', '.markdown', '.txt', '.json', '.yaml', '.yml'].includes(ext)) {
             const full = path.join(folderPath, entry.name)
             try {
-              const buf = await fs.readFile(full)
+              const real = await fs.realpath(full)
+              const relative = path.relative(folderPath, real)
+              if (relative.startsWith('..') || path.isAbsolute(relative)) continue
+              const stat = await fs.stat(real)
+              if (!stat.isFile() || stat.size > MAX_SKILL_FILE_BYTES) continue
+              totalBytes += stat.size
+              if (totalBytes > MAX_SKILL_TOTAL_BYTES) throw new Error('技能文件总大小超过 10 MB 限制')
+              const buf = await fs.readFile(real)
               let content = buf.toString('utf-8')
               if (content.includes('\uFFFD')) {
                 const iconv = await import('iconv-lite').catch(() => null)
@@ -249,47 +320,16 @@ function parseMarkdownWithFrontmatter(content: string): { frontmatter: Record<st
 
 /** 极简 docx 文本提取：解压 docx（zip），读取 word/document.xml，剥离标签 */
 async function extractDocxText(filePath: string): Promise<string> {
-  const { readFile } = await import('node:fs/promises')
-  const buf = await readFile(filePath)
-  // 直接用 Node 内置 zlib 解析 docx（zip），仅读取 word/document.xml
-  // 不引入 mammoth（项目未装），保持零额外依赖
-  return parseDocxWithZlib(buf)
-}
-
-async function parseDocxWithZlib(buf: Buffer): Promise<string> {
-  // 极简 zip central directory 解析（仅用于无依赖的 docx 文本提取）
-  // 找到 PK\x03\x04 本地文件头并解压 word/document.xml
-  const zlib = await import('node:zlib')
-  let offset = 0
-  const entries: { name: string; data: Buffer }[] = []
-  while (offset < buf.length - 4) {
-    if (buf[offset] === 0x50 && buf[offset + 1] === 0x4b && buf[offset + 2] === 0x03 && buf[offset + 3] === 0x04) {
-      const nameLen = buf.readUInt16LE(offset + 26)
-      const extraLen = buf.readUInt16LE(offset + 28)
-      const compMethod = buf.readUInt16LE(offset + 8)
-      const compSize = buf.readUInt32LE(offset + 18)
-      const dataStart = offset + 30 + nameLen + extraLen
-      const name = buf.slice(offset + 30, offset + 30 + nameLen).toString('utf-8')
-      const compData = buf.slice(dataStart, dataStart + compSize)
-      try {
-        let data: Buffer
-        if (compMethod === 0) data = compData
-        else if (compMethod === 8) data = zlib.inflateRawSync(compData)
-        else data = compData
-        entries.push({ name, data })
-      } catch {
-        // skip
-      }
-      offset = dataStart + compSize
-    } else {
-      offset++
-    }
-  }
-  const doc = entries.find((e) => e.name === 'word/document.xml')
+  const buf = await fs.readFile(filePath)
+  const zip = await JSZip.loadAsync(buf, { checkCRC32: true })
+  const doc = zip.file('word/document.xml')
   if (!doc) {
     throw new Error('无法解析 docx：未找到 word/document.xml。建议改用 .txt 文件。')
   }
-  let xml = doc.data.toString('utf-8')
+  const declaredSize = Number((doc as any)._data?.uncompressedSize || 0)
+  if (declaredSize > MAX_DOCX_XML_BYTES) throw new Error('DOCX 正文解压后超过 20 MB 限制')
+  let xml = await doc.async('string')
+  if (Buffer.byteLength(xml, 'utf8') > MAX_DOCX_XML_BYTES) throw new Error('DOCX 正文解压后超过 20 MB 限制')
   // 段落换行
   xml = xml.replace(/<\/w:p>/g, '\n')
   // 去标签

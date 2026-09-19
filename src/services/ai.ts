@@ -3,11 +3,19 @@ import type { AIRequest, ChatMessage, ImageGenRequest } from '@/types'
 
 /** 流式调用，onChunk 接收增量文本，返回完整文本 */
 export function streamChat(req: AIRequest, onChunk: (text: string) => void): Promise<string> {
-  // window.api.ai.stream 返回 { promise, cancel }，这里保持向后兼容只返回 promise
-  const ret = window.api.ai.stream(req, onChunk)
-  // 兼容两种返回形态
-  if (ret && typeof (ret as any).then === 'function') return ret as unknown as Promise<string>
-  return (ret as any).promise as Promise<string>
+  return startStreamChat(req, onChunk).promise
+}
+
+/** 可取消的流式调用；带“停止生成”的页面应使用此接口。 */
+export function startStreamChat(req: AIRequest, onChunk: (text: string) => void): { promise: Promise<string>; cancel: () => void } {
+  const ret = window.api.ai.stream(req, onChunk) as any
+  if (ret && typeof ret.then === 'function') {
+    return { promise: ret as Promise<string>, cancel: () => {} }
+  }
+  return {
+    promise: ret.promise as Promise<string>,
+    cancel: typeof ret.cancel === 'function' ? ret.cancel : () => {}
+  }
 }
 
 /** 非流式调用 */

@@ -5,6 +5,7 @@ import { getDB } from '../lib/db'
 import { marked } from 'marked'
 import { EPub } from 'epub-gen-memory'
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx'
+import { sanitizeDocumentHtml } from '../lib/html'
 
 async function buildProjectData(projectId: string) {
   const db = getDB()
@@ -81,7 +82,8 @@ export function registerExportIPC() {
     for (const c of chapters) {
       const safeChapTitle = escapeHtml(c.title)
       body += `<h2>第${c.order}章 ${safeChapTitle}</h2>`
-      body += c.contentType === 'html' ? c.content : (marked.parse(c.content) as string)
+      const chapterHtml = c.contentType === 'html' ? c.content : (marked.parse(c.content || '') as string)
+      body += sanitizeDocumentHtml(chapterHtml)
     }
     const html = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>${safeTitle}</title>
     <style>body{max-width:760px;margin:40px auto;font-family:"思源宋体",serif;line-height:1.9;padding:0 16px}
@@ -99,7 +101,7 @@ export function registerExportIPC() {
     const { project, chapters } = await buildProjectData(projectId)
     const sections = chapters.map(c => ({
       title: `第${c.order}章 ${c.title}`,
-      content: c.contentType === 'html' ? c.content : (marked.parse(c.content) as string)
+      content: sanitizeDocumentHtml(c.contentType === 'html' ? c.content : (marked.parse(c.content || '') as string))
     }))
     if (sections.length === 0) sections.push({ title: '空', content: '<p>暂无内容</p>' })
     const epub = new EPub(
@@ -163,7 +165,7 @@ export function registerExportIPC() {
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${safePTitle}</title>
       <style>body{font-family:'Microsoft YaHei',sans-serif;max-width:800px;margin:40px auto;padding:20px;line-height:1.8}
       h1{text-align:center} h2{margin-top:2em;border-bottom:1px solid #ccc;padding-bottom:5px}</style></head>
-      <body><h1>${safePTitle}</h1>${data.chapters.map(c => `<h2>${escapeHtml(c.title)}</h2>${c.content}`).join('')}</body></html>`
+      <body><h1>${safePTitle}</h1>${data.chapters.map(c => `<h2>${escapeHtml(c.title)}</h2>${sanitizeDocumentHtml(c.content)}`).join('')}</body></html>`
 
       const pdfWin = new BrowserWindow({
         show: false,
@@ -188,6 +190,8 @@ export function registerExportIPC() {
 
   // ====== 通用文件保存 ======
   ipcMain.handle('export:save', async (e, defaultName: string, content: string) => {
+    if (typeof defaultName !== 'string' || typeof content !== 'string') throw new Error('保存内容格式无效')
+    if (Buffer.byteLength(content, 'utf8') > 50 * 1024 * 1024) throw new Error('保存内容超过 50 MB 限制')
     const win = BrowserWindow.fromWebContents(e.sender)
     const ext = path.extname(defaultName).slice(1) || 'txt'
     const r = await saveDialog(win, defaultName, ext)

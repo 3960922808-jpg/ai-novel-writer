@@ -31,6 +31,14 @@ jobs:
         run: pnpm run build:win
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: 生成 SHA-256 校验文件
+        shell: pwsh
+        run: |
+          $lines = Get-ChildItem -LiteralPath release -File |
+            Where-Object { $_.Extension -in '.exe', '.zip' } |
+            Sort-Object Name |
+            ForEach-Object { "$( (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() )  $($_.Name)" }
+          $lines | Set-Content -LiteralPath release/SHA256SUMS.txt -Encoding ascii
       - name: 发布版本文件
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
@@ -39,6 +47,7 @@ jobs:
           files: |
             release/*.exe
             release/*.zip
+            release/SHA256SUMS.txt
       - name: 保存手动构建产物
         uses: actions/upload-artifact@v4
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -47,3 +56,4 @@ jobs:
           path: |
             release/*.exe
             release/*.zip
+            release/SHA256SUMS.txt

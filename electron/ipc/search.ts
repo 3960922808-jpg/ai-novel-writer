@@ -20,11 +20,44 @@ export interface SearchRequest {
   apiKey?: string
 }
 
+const SEARCH_TIMEOUT_MS = 20_000
+const MAX_SEARCH_RESPONSE_BYTES = 5 * 1024 * 1024
+
+async function fetchSearchText(url: string, init: RequestInit): Promise<{ response: Response; text: string }> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS)
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal })
+    const declared = Number(response.headers.get('content-length') || 0)
+    if (declared > MAX_SEARCH_RESPONSE_BYTES) throw new Error('搜索服务响应超过 5 MB 限制')
+    if (!response.body) return { response, text: '' }
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let total = 0
+    let text = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      total += value.byteLength
+      if (total > MAX_SEARCH_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => {})
+        throw new Error('搜索服务响应超过 5 MB 限制')
+      }
+      text += decoder.decode(value, { stream: true })
+    }
+    return { response, text: text + decoder.decode() }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export function registerSearchIPC() {
   ipcMain.handle('search:web', async (_e, req: SearchRequest) => {
     if (!req?.query?.trim()) {
       throw new Error('请输入搜索关键词')
     }
+    if (req.query.length > 1000) throw new Error('搜索关键词过长')
+    if (req.apiKey && (typeof req.apiKey !== 'string' || req.apiKey.length > 20_000)) throw new Error('搜索 API Key 格式无效')
     const max = Math.min(req.maxResults || 8, 20)
     const provider = req.provider || 'duckduckgo'
     try {
@@ -47,7 +80,7 @@ async function searchDuckDuckGo(query: string, max: number): Promise<SearchResul
   // 先尝试 lite 接口（更稳定）
   try {
     const url = 'https://lite.duckduckgo.com/lite/?q=' + encodeURIComponent(query)
-    const resp = await fetch(url, {
+    const { response: resp, text: html } = await fetchSearchText(url, {
       method: 'GET',
       headers: {
         'User-Agent':
@@ -57,7 +90,6 @@ async function searchDuckDuckGo(query: string, max: number): Promise<SearchResul
       }
     })
     if (!resp.ok) throw new Error(`DuckDuckGo Lite 返回 ${resp.status}`)
-    const html = await resp.text()
     const results = parseDuckDuckGoLiteHtml(html, max)
     if (results.length > 0) return results
     // lite 没结果则继续尝试 html 接口
@@ -66,7 +98,7 @@ async function searchDuckDuckGo(query: string, max: number): Promise<SearchResul
   }
   // 回退到 html 接口
   const url = 'https://html.duckduckgo.com/html/?q=' + encodeURIComponent(query)
-  const resp = await fetch(url, {
+  const { response: resp, text: html } = await fetchSearchText(url, {
     method: 'GET',
     headers: {
       'User-Agent':
@@ -77,7 +109,6 @@ async function searchDuckDuckGo(query: string, max: number): Promise<SearchResul
   if (!resp.ok) {
     throw new Error(`DuckDuckGo 返回 ${resp.status}`)
   }
-  const html = await resp.text()
   return parseDuckDuckGoHtml(html, max)
 }
 
@@ -190,7 +221,7 @@ async function searchTavily(
   max: number,
   apiKey: string
 ): Promise<SearchResult[]> {
-  const resp = await fetch('https://api.tavily.com/search', {
+  const { response: resp, text } = await fetchSearchText('https://api.tavily.com/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -201,10 +232,10 @@ async function searchTavily(
     })
   })
   if (!resp.ok) {
-    const txt = await resp.text().catch(() => '')
-    throw new Error(`Tavily ${resp.status}: ${txt.slice(0, 200)}`)
+    throw new Error(`Tavily ${resp.status}: ${text.slice(0, 200)}`)
   }
-  const json = await resp.json()
+  let json: any
+  try { json = JSON.parse(text) } catch { throw new Error('Tavily 返回了无效 JSON') }
   const arr: any[] = json?.results || []
   return arr.slice(0, max).map((r) => ({
     title: r.title || '',
@@ -220,7 +251,7 @@ async function searchSerper(
   max: number,
   apiKey: string
 ): Promise<SearchResult[]> {
-  const resp = await fetch('https://google.serper.dev/search', {
+  const { response: resp, text } = await fetchSearchText('https://google.serper.dev/search', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -229,10 +260,10 @@ async function searchSerper(
     body: JSON.stringify({ q: query, num: max })
   })
   if (!resp.ok) {
-    const txt = await resp.text().catch(() => '')
-    throw new Error(`Serper ${resp.status}: ${txt.slice(0, 200)}`)
+    throw new Error(`Serper ${resp.status}: ${text.slice(0, 200)}`)
   }
-  const json = await resp.json()
+  let json: any
+  try { json = JSON.parse(text) } catch { throw new Error('Serper 返回了无效 JSON') }
   const organic: any[] = json?.organic || []
   return organic.slice(0, max).map((r) => ({
     title: r.title || '',

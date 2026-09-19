@@ -11,6 +11,7 @@ import { registerObsidianIPC } from './ipc/obsidian'
 import { registerSweepIPC } from './ipc/sweep'
 import { initDB } from './lib/db'
 import { startUpdater, checkOnce, downloadAndRestart, openDownloadInBrowser } from './lib/updater'
+import { isSafeExternalUrl } from './lib/security'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -68,9 +69,9 @@ function createWindow() {
 
   // 开发模式加载 dev server，生产模式加载打包文件
   const isDev = !app.isPackaged
+  const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173'
   if (isDev) {
     // 优先用 vite-plugin-electron 注入的 URL，回退到默认端口
-    const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173'
     console.log('[main] 开发模式，加载:', devUrl)
     mainWindow.loadURL(devUrl).catch(err => {
       console.error('[main] 加载 dev server 失败:', err)
@@ -95,8 +96,16 @@ function createWindow() {
 
   // 外部链接在浏览器打开
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    if (isSafeExternalUrl(url)) shell.openExternal(url)
     return { action: 'deny' }
+  })
+
+  // 防止普通链接把应用自身导航到远程页面；外链只允许交给系统浏览器打开。
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const currentUrl = mainWindow?.webContents.getURL() || ''
+    if (url === currentUrl || (isDev && url.startsWith(devUrl))) return
+    event.preventDefault()
+    if (isSafeExternalUrl(url)) shell.openExternal(url)
   })
 
   mainWindow.on('closed', () => {

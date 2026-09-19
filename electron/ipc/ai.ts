@@ -1,5 +1,70 @@
 import { ipcMain, IpcMainInvokeEvent } from 'electron'
 import type { AIRequest, ImageGenRequest } from '../../src/types'
+import { parseHttpUrl } from '../lib/security'
+
+const MAX_MESSAGE_COUNT = 100
+const MAX_MESSAGE_CHARS = 2_000_000
+const CHAT_TIMEOUT_MS = 5 * 60 * 1000
+const IMAGE_TIMEOUT_MS = 3 * 60 * 1000
+const MAX_IMAGE_BASE64_CHARS = 35_000_000
+const MAX_CHAT_RESPONSE_BYTES = 20 * 1024 * 1024
+const MAX_IMAGE_RESPONSE_BYTES = 50 * 1024 * 1024
+
+function validateAIRequest(req: AIRequest): string {
+  if (!req || typeof req !== 'object') throw new Error('AI 请求格式无效')
+  if (!req.baseUrl || !req.apiKey) throw new Error('未配置 baseUrl 或 apiKey')
+  if (typeof req.apiKey !== 'string' || req.apiKey.length > 20_000) throw new Error('API Key 格式无效')
+  if (typeof req.model !== 'string' || !req.model.trim() || req.model.length > 200) throw new Error('模型名称无效')
+  if (!Array.isArray(req.messages) || req.messages.length === 0 || req.messages.length > MAX_MESSAGE_COUNT) {
+    throw new Error(`消息数量必须在 1-${MAX_MESSAGE_COUNT} 条之间`)
+  }
+  let total = 0
+  for (const message of req.messages) {
+    if (!message || !['system', 'user', 'assistant'].includes(message.role) || typeof message.content !== 'string') {
+      throw new Error('消息格式无效')
+    }
+    total += message.content.length
+  }
+  if (total > MAX_MESSAGE_CHARS) throw new Error('请求上下文过大，请减少关联内容')
+  const base = parseHttpUrl(req.baseUrl.replace(/\/+$/, ''))
+  return new URL(`${base.pathname.replace(/\/+$/, '')}/chat/completions`, base.origin).toString()
+}
+
+function boundedNumber(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? Math.min(Math.max(parsed, min), max) : fallback
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function readTextLimited(response: Response, maxBytes: number): Promise<string> {
+  if (!response.body) return ''
+  const declared = Number(response.headers.get('content-length') || 0)
+  if (declared > maxBytes) throw new Error(`响应超过 ${(maxBytes / 1024 / 1024).toFixed(0)} MB 限制`)
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let total = 0
+  let output = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {})
+      throw new Error(`响应超过 ${(maxBytes / 1024 / 1024).toFixed(0)} MB 限制`)
+    }
+    output += decoder.decode(value, { stream: true })
+  }
+  return output + decoder.decode()
+}
 
 /**
  * 安全地给渲染进程发消息：webContents 可能在流式过程中被销毁（用户关窗），
@@ -86,22 +151,45 @@ function extractDelta(json: any): string {
 }
 
 export function registerAIIPC() {
+  // Provider 连通性与模型列表检查放在主进程，避免渲染器 CORS 导致“接口可用但测试失败”。
+  ipcMain.handle('ai:list-models', async (_event, input: { baseUrl?: string; apiKey?: string }) => {
+    if (!input || typeof input !== 'object' || !input.baseUrl) throw new Error('未配置 BaseURL')
+    const base = parseHttpUrl(input.baseUrl.replace(/\/+$/, ''))
+    const url = new URL(`${base.pathname.replace(/\/+$/, '')}/models`, base.origin).toString()
+    const response = await fetchWithTimeout(url, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        ...(input.apiKey ? { Authorization: `Bearer ${input.apiKey}` } : {})
+      }
+    }, 20_000)
+    const text = await readTextLimited(response, 2 * 1024 * 1024)
+    if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}${text ? ' · ' + text.slice(0, 200) : ''}`)
+    let data: any
+    try { data = text ? JSON.parse(text) : {} } catch { throw new Error('接口返回的模型列表不是有效 JSON') }
+    const raw = Array.isArray(data?.data) ? data.data : (Array.isArray(data?.models) ? data.models : [])
+    const models = raw
+      .map((item: any) => typeof item === 'string' ? item : (item?.id || item?.name || ''))
+      .filter((item: unknown): item is string => typeof item === 'string' && !!item && item.length <= 200)
+      .slice(0, 2000)
+    return { models }
+  })
+
   // 流式聊天
   ipcMain.handle('ai:stream', async (event, req: AIRequest, chan: string) => {
-    if (!req.baseUrl || !req.apiKey) {
-      throw new Error('未配置 baseUrl 或 apiKey')
-    }
-    const url = req.baseUrl.replace(/\/+$/, '') + '/chat/completions'
+    if (typeof chan !== 'string' || !/^ai:stream:[a-z0-9]+$/i.test(chan)) throw new Error('流式通道无效')
+    const url = validateAIRequest(req)
     const body: any = {
       model: req.model,
       messages: req.messages,
       stream: true,
-      temperature: req.temperature ?? 0.8,
-      max_tokens: req.maxTokens ?? 2048,
-      top_p: req.topP ?? 1
+      temperature: boundedNumber(req.temperature, 0.8, 0, 2),
+      max_tokens: Math.round(boundedNumber(req.maxTokens, 2048, 1, 128_000)),
+      top_p: boundedNumber(req.topP, 1, 0, 1)
     }
 
     const ctrl = new AbortController()
+    const requestTimer = setTimeout(() => ctrl.abort(), CHAT_TIMEOUT_MS)
     let aborted = false
 
     // 监听取消（前端可以发 'ai:stream:cancel' + chan）
@@ -139,6 +227,7 @@ export function registerAIIPC() {
       // 收集非 SSE 响应体，结束后兜底解析
       let nonStreamBody = ''
       let looksLikeSSE = false
+      let receivedBytes = 0
 
       // 处理单行 SSE data，返回是否遇到 [DONE]
       const processLine = (rawLine: string): boolean => {
@@ -181,6 +270,11 @@ export function registerAIIPC() {
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
+        receivedBytes += value.byteLength
+        if (receivedBytes > MAX_CHAT_RESPONSE_BYTES) {
+          await reader.cancel().catch(() => {})
+          throw new Error('AI 响应超过 20 MB 限制')
+        }
         const chunkStr = decoder.decode(value, { stream: true })
         buffer += chunkStr
         // 只要出现 "data:" 就认为是 SSE 流
@@ -227,17 +321,17 @@ export function registerAIIPC() {
       // 不再把错误信息当作流式 chunk 发给前端，避免被当作正文渲染
       throw err
     } finally {
+      clearTimeout(requestTimer)
       ipcMain.removeListener('ai:stream:cancel', cancelHandler)
     }
   })
 
   // 非流式
   ipcMain.handle('ai:chat', async (_e, req: AIRequest) => {
-    if (!req.baseUrl || !req.apiKey) {
-      throw new Error('未配置 baseUrl 或 apiKey')
-    }
+    const url = validateAIRequest(req)
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), CHAT_TIMEOUT_MS)
     try {
-      const url = req.baseUrl.replace(/\/+$/, '') + '/chat/completions'
       const resp = await fetch(url, {
         method: 'POST',
         headers: {
@@ -247,29 +341,36 @@ export function registerAIIPC() {
         body: JSON.stringify({
           model: req.model,
           messages: req.messages,
-          temperature: req.temperature ?? 0.8,
-          max_tokens: req.maxTokens ?? 2048,
-          top_p: req.topP ?? 1,
+          temperature: boundedNumber(req.temperature, 0.8, 0, 2),
+          max_tokens: Math.round(boundedNumber(req.maxTokens, 2048, 1, 128_000)),
+          top_p: boundedNumber(req.topP, 1, 0, 1),
           stream: false
-        })
+        }),
+        signal: ctrl.signal
       })
       if (!resp.ok) {
         const txt = await resp.text().catch(() => '')
         throw new Error(`API ${resp.status}: ${txt.slice(0, 500) || resp.statusText}`)
       }
-      const json = await resp.json()
+      const text = await readTextLimited(resp, MAX_CHAT_RESPONSE_BYTES)
+      let json: any
+      try { json = JSON.parse(text) } catch { throw new Error('AI 接口返回了无效 JSON') }
       return extractDelta(json) || json.choices?.[0]?.message?.content || ''
     } catch (e: any) {
       // 保留原始错误信息，避免前端再包装一次造成"AI 请求失败：AI 请求失败：API 401"
       throw e
+    } finally {
+      clearTimeout(timer)
     }
   })
 
   // ====== 图片生成（小说封面）======
   // 仅支持 OpenAI gpt-image-1 与 Google Imagen，二者鉴权与 endpoint 不同，按 provider 分支
   ipcMain.handle('ai:image-generate', async (_e, req: ImageGenRequest): Promise<string> => {
+    if (!req || typeof req !== 'object') throw new Error('图片生成请求格式无效')
     if (!req.apiKey) throw new Error('未配置图片生成 API Key')
-    if (!req.prompt) throw new Error('提示词不能为空')
+    if (!req.prompt || typeof req.prompt !== 'string') throw new Error('提示词不能为空')
+    if (req.prompt.length > 20_000) throw new Error('图片提示词过长')
     try {
       if (req.provider === 'google') {
         return await generateImageGoogle(req)
@@ -284,11 +385,11 @@ export function registerAIIPC() {
 
 /** OpenAI gpt-image-1 / DALL-E 系列：POST {baseUrl}/images/generations */
 async function generateImageOpenAI(req: ImageGenRequest): Promise<string> {
-  const baseUrl = (req.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '')
+  const baseUrl = parseHttpUrl((req.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '')).toString().replace(/\/$/, '')
   const url = `${baseUrl}/images/generations`
   const model = req.model || 'gpt-image-1'
   const size = req.size || '1024x1536'
-  const resp = await fetch(url, {
+  const resp = await fetchWithTimeout(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -302,13 +403,16 @@ async function generateImageOpenAI(req: ImageGenRequest): Promise<string> {
       // gpt-image-1 只支持 b64_json；dall-e-3 支持 url。统一要 b64 便于直接存库
       response_format: 'b64_json'
     })
-  })
+  }, IMAGE_TIMEOUT_MS)
   if (!resp.ok) {
     const txt = await resp.text().catch(() => '')
     throw new Error(`OpenAI 图片生成失败 ${resp.status}: ${txt.slice(0, 500) || resp.statusText}`)
   }
-  const json = await resp.json()
+  const text = await readTextLimited(resp, MAX_IMAGE_RESPONSE_BYTES)
+  let json: any
+  try { json = JSON.parse(text) } catch { throw new Error('OpenAI 图片接口返回了无效 JSON') }
   const b64 = json?.data?.[0]?.b64_json
+  if (typeof b64 === 'string' && b64.length > MAX_IMAGE_BASE64_CHARS) throw new Error('生成图片超过大小限制')
   if (!b64) {
     // 某些中转站只返回 url，降级取 url（前端再下载转 base64 较复杂，这里直接报错引导用 b64）
     if (json?.data?.[0]?.url) {
@@ -322,12 +426,12 @@ async function generateImageOpenAI(req: ImageGenRequest): Promise<string> {
 /** Google Imagen：POST {baseUrl}/models/{model}:predict?key=apiKey */
 async function generateImageGoogle(req: ImageGenRequest): Promise<string> {
   // Generative Language API（最易接入，无需 Vertex AI 项目配置）
-  const baseUrl = (req.baseUrl || 'https://generativelanguage.googleapis.com/v1beta').replace(/\/+$/, '')
+  const baseUrl = parseHttpUrl((req.baseUrl || 'https://generativelanguage.googleapis.com/v1beta').replace(/\/+$/, '')).toString().replace(/\/$/, '')
   const model = req.model || 'imagen-4.0-generate-001'
   // 尺寸映射：Google Imagen 用 aspectRatio，OpenAI 风格的 size 需转换
   const aspectRatio = sizeToGoogleAspect(req.size)
   const url = `${baseUrl}/models/${encodeURIComponent(model)}:predict`
-  const resp = await fetch(`${url}?key=${encodeURIComponent(req.apiKey)}`, {
+  const resp = await fetchWithTimeout(`${url}?key=${encodeURIComponent(req.apiKey)}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
@@ -340,13 +444,16 @@ async function generateImageGoogle(req: ImageGenRequest): Promise<string> {
         ...(aspectRatio ? { aspectRatio } : {})
       }
     })
-  })
+  }, IMAGE_TIMEOUT_MS)
   if (!resp.ok) {
     const txt = await resp.text().catch(() => '')
     throw new Error(`Google 图片生成失败 ${resp.status}: ${txt.slice(0, 500) || resp.statusText}`)
   }
-  const json = await resp.json()
+  const text = await readTextLimited(resp, MAX_IMAGE_RESPONSE_BYTES)
+  let json: any
+  try { json = JSON.parse(text) } catch { throw new Error('Google 图片接口返回了无效 JSON') }
   const b64 = json?.predictions?.[0]?.bytesBase64Encoded
+  if (typeof b64 === 'string' && b64.length > MAX_IMAGE_BASE64_CHARS) throw new Error('生成图片超过大小限制')
   if (!b64) {
     throw new Error('Google 返回数据缺少 bytesBase64Encoded 字段')
   }

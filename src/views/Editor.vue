@@ -577,7 +577,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowLeft, ArrowRight, ArrowDown, ArrowRight as Right, Back, Search, Plus,
@@ -592,8 +592,7 @@ import {
 } from '@element-plus/icons-vue'
 import { useEditor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
-import Placeholder from '@tiptap/extension-placeholder'
-import CharacterCount from '@tiptap/extension-character-count'
+import { Placeholder, CharacterCount } from '@tiptap/extensions'
 import { useProjectStore } from '@/stores/project'
 import { useSettingsStore } from '@/stores/settings'
 import * as db from '@/services/db'
@@ -788,8 +787,9 @@ function startAutoSave() {
   }, seconds * 1000)
 }
 
-async function save(opts: { silent?: boolean } = {}) {
-  if (!editor.value || !chapter.value || isLoading.value) return
+async function save(opts: { silent?: boolean } = {}): Promise<boolean> {
+  if (!editor.value || !chapter.value) return true
+  if (isLoading.value) return false
   const savingRevision = contentRevision
   saveStatus.value = 'saving'
   try {
@@ -804,13 +804,16 @@ async function save(opts: { silent?: boolean } = {}) {
       if (saveStatus.value === 'saved') saveStatus.value = 'idle'
     }, 1500)
     if (!opts.silent) ElMessage.success('已保存')
+    return true
   } catch (e: any) {
-    saveStatus.value = 'idle'
+    // 保持 dirty，自动保存定时器会继续重试，不能把失败伪装成已保存。
+    saveStatus.value = 'dirty'
     if (!opts.silent) {
       ElMessage.error('保存失败：' + e.message)
     } else {
       console.warn('[Editor] 保存失败（静默）:', e.message)
     }
+    return false
   }
 }
 
@@ -881,7 +884,7 @@ async function loadChapter(id: string) {
     saveStatus.value = 'idle'
     if (editor.value) {
       // false 表示不触发 onUpdate
-      editor.value.commands.setContent(target.content || '', false)
+      editor.value.commands.setContent(target.content || '', { emitUpdate: false })
     }
     // 用 requestAnimationFrame 让浏览器先绘制，再做聚焦等非关键操作
     requestAnimationFrame(() => {
@@ -927,14 +930,15 @@ function genMsgId(): string {
   return `m${Date.now().toString(36)}_${_msgIdSeq}`
 }
 /** 追加一条对话消息，自动分配唯一 id 并持久化到 db */
-function pushMsg(msg: Omit<EditorChatMessage, 'id'>) {
+async function pushMsg(msg: Omit<EditorChatMessage, 'id'>): Promise<void> {
   const id = genMsgId()
   chatMessages.value.push({ ...msg, id })
   // 持久化（fire-and-forget，失败不影响对话流）
   const pid = project.value?.id
   const sid = chapter.value?.id
   if (pid && sid) {
-    db.Messages.save({
+    try {
+      await db.Messages.save({
       id,
       projectId: pid,
       sessionId: sid,
@@ -943,8 +947,12 @@ function pushMsg(msg: Omit<EditorChatMessage, 'id'>) {
       options: msg.options,
       selectedOption: msg.selectedOption,
       isQuestion: msg.isQuestion,
-      createdAt: Date.now()
-    }).catch(e => console.error('[chat] 保存消息失败:', e?.message || e))
+        createdAt: Date.now()
+      })
+    } catch (e: any) {
+      console.error('[chat] 保存消息失败:', e?.message || e)
+      ElMessage.error('对话消息保存失败')
+    }
   }
 }
 /** 加载当前章节的对话历史 */
@@ -972,11 +980,12 @@ async function loadChatHistoryList() {
   const pid = project.value?.id
   if (!pid) { chatHistoryList.value = []; return }
   try {
-    const sessions = await db.Messages.listSessions(pid)
+    const chapterIds = new Set(projectStore.chapters.map(chapter => chapter.id))
+    const sessions = (await db.Messages.listSessions(pid)).filter(session => chapterIds.has(session.sessionId))
     chatHistoryList.value = sessions.map(s => {
       // sessionId 即 chapterId，映射成"第X章 · 标题"
       const ch = projectStore.chapters.find(c => c.id === s.sessionId)
-      const title = ch ? `第${ch.order}章 · ${ch.title}` : (s.sessionId === 'settings' ? '设定对话' : '对话')
+      const title = ch ? `第${ch.order}章 · ${ch.title}` : '对话'
       return { id: s.sessionId, title, time: s.lastTime }
     })
   } catch (e: any) {
@@ -1039,10 +1048,12 @@ function linkCurrentChapter() {
 
 async function uploadAttachment() {
   try {
-    const filePath = await window.api.file.selectNovel()
-    if (!filePath) return
+    const selected = await window.api.file.selectNovel()
+    const filePath = Array.isArray(selected) ? selected[0] : selected
+    if (!filePath || typeof filePath !== 'string') return
     ElMessage.info('正在读取文件...')
-    const text = await window.api.file.readNovelText(filePath)
+    const result = await window.api.file.readNovelText(filePath)
+    const text = typeof result === 'string' ? result : (result?.content || '')
     if (!text || !text.trim()) {
       ElMessage.warning('文件内容为空')
       return
@@ -1385,7 +1396,11 @@ async function sendChat() {
   const displayMsg = pendingSkill.value
     ? `[技能：${pendingSkill.value.name}]${userMsg ? '\n' + userMsg : ''}${linkedLabels ? '\n' + linkedLabels : ''}`
     : (userMsg || linkedLabels)
-  pushMsg({ role: 'user', content: displayMsg })
+  generating.value = true
+  aiStreamingText.value = ''
+  stopFlag.value = false
+  currentStreamCancel = null
+  await pushMsg({ role: 'user', content: displayMsg })
   userInput.value = ''
   slashMenuVisible.value = false
 
@@ -1488,10 +1503,6 @@ async function sendChat() {
     }
   }
 
-  generating.value = true
-  aiStreamingText.value = ''
-  stopFlag.value = false
-  currentStreamCancel = null
   try {
     const ret = window.api.ai.stream(
       aiSvc.buildRequest({
@@ -1520,23 +1531,23 @@ async function sendChat() {
     const full: string = isWrapper
       ? await (retObj as { promise: Promise<string> }).promise
       : await (retObj as Promise<string>)
-    if (full) {
+    if (full && !stopFlag.value) {
       // 解析 AI 输出是否包含 ===QUESTION===...===END=== 提问块
       const parsed = parseQuestionBlock(full)
       if (parsed) {
         // 块外有正文（AI 先写一段再给选项）时，先把正文作为普通消息保存，避免丢失
         if (parsed.leadingText) {
-          pushMsg({ role: 'assistant', content: parsed.leadingText })
+          await pushMsg({ role: 'assistant', content: parsed.leadingText })
         }
         // AI 提问了，把消息改为带 options 的提问卡片
-        pushMsg({
+        await pushMsg({
           role: 'assistant',
           content: parsed.question,
           options: parsed.options,
           isQuestion: true
         })
       } else {
-        pushMsg({ role: 'assistant', content: full })
+        await pushMsg({ role: 'assistant', content: full })
       }
     }
   } catch (e: any) {
@@ -1548,7 +1559,7 @@ async function sendChat() {
   }
 }
 
-function stopGenerate() {
+async function stopGenerate() {
   // 设置 stopFlag 后，streamChat 的 onChunk 回调会立刻 return，不再累加 aiStreamingText
   stopFlag.value = true
   // 通知主进程 AbortController.abort()，真正中止 fetch
@@ -1556,8 +1567,10 @@ function stopGenerate() {
     try { currentStreamCancel() } catch {}
     currentStreamCancel = null
   }
+  const partial = aiStreamingText.value.trim()
   generating.value = false
   aiStreamingText.value = ''
+  if (partial) await pushMsg({ role: 'assistant', content: partial })
 }
 
 // ===== AI 提问解析与回答 =====
@@ -1647,20 +1660,38 @@ async function answerQuestion(msg: EditorChatMessage, idx: number) {
         return
       }
       msg.options![idx].text = `自定义：${custom}`
+      await persistChatMessage(msg)
       if (alreadyAnswered) return // 仅更新标记，不续写
-      pushMsg({ role: 'user', content: `我选 D（自定义）：${custom}\n请按这个方向继续创作。` })
+      await pushMsg({ role: 'user', content: `我选 D（自定义）：${custom}\n请按这个方向继续创作。` })
     } catch {
       // 用户取消，撤销选择
       if (!alreadyAnswered) msg.selectedOption = undefined
       return
     }
   } else {
+    await persistChatMessage(msg)
     if (alreadyAnswered) return // 仅更新标记，不续写
     const answer = `我选 ${String.fromCharCode(65 + idx)}：${opt.text}\n请按这个方向继续创作。`
-    pushMsg({ role: 'user', content: answer })
+    await pushMsg({ role: 'user', content: answer })
   }
   // 触发续写
   await continueAfterAnswer()
+}
+
+async function persistChatMessage(msg: EditorChatMessage) {
+  const pid = project.value?.id
+  const sid = chapter.value?.id
+  if (!pid || !sid) return
+  await db.Messages.save({
+    id: msg.id,
+    projectId: pid,
+    sessionId: sid,
+    role: msg.role,
+    content: msg.content,
+    options: msg.options,
+    selectedOption: msg.selectedOption,
+    isQuestion: msg.isQuestion
+  })
 }
 
 /**
@@ -1699,7 +1730,7 @@ async function continueAfterAnswer() {
   aiStreamingText.value = ''
   stopFlag.value = false
   try {
-    const full = await aiSvc.streamChat(
+    const stream = aiSvc.startStreamChat(
       aiSvc.buildRequest({
         baseUrl: provider.baseUrl,
         apiKey: provider.apiKey,
@@ -1717,20 +1748,22 @@ async function continueAfterAnswer() {
         aiStreamingText.value += chunk
       }
     )
-    if (full) {
+    currentStreamCancel = stream.cancel
+    const full = await stream.promise
+    if (full && !stopFlag.value) {
       const parsed = parseQuestionBlock(full)
       if (parsed) {
         if (parsed.leadingText) {
-          pushMsg({ role: 'assistant', content: parsed.leadingText })
+          await pushMsg({ role: 'assistant', content: parsed.leadingText })
         }
-        pushMsg({
+        await pushMsg({
           role: 'assistant',
           content: parsed.question,
           options: parsed.options,
           isQuestion: true
         })
       } else {
-        pushMsg({ role: 'assistant', content: full })
+        await pushMsg({ role: 'assistant', content: full })
       }
     }
   } catch (e: any) {
@@ -1738,6 +1771,7 @@ async function continueAfterAnswer() {
   } finally {
     generating.value = false
     aiStreamingText.value = ''
+    currentStreamCancel = null
   }
 }
 
@@ -1755,12 +1789,12 @@ async function askAiToQuestion(msg: EditorChatMessage) {
   const sysContent = `你是一位资深小说家。用户希望你在当前剧情节点给出 ABCD 四个走向选项让用户选择。严格按以下格式输出，不要其他文字：\n===QUESTION===\n问题：<基于当前剧情提出一个关键走向问题>\nA. <选项一>\nB. <选项二>\nC. <选项三>\nD. 自定义\n===END===`
   const userContent = `【当前上下文】\n${ctx}\n\n上一段 AI 输出：\n${msg.content?.slice(-500) || '（无）'}\n\n请给出 ABCD 选项。`
   // 先 push 一条提示
-  pushMsg({ role: 'user', content: '[让 AI 提问] 请基于当前剧情给出 ABCD 选项' })
+  await pushMsg({ role: 'user', content: '[让 AI 提问] 请基于当前剧情给出 ABCD 选项' })
   generating.value = true
   aiStreamingText.value = ''
   stopFlag.value = false
   try {
-    const full = await aiSvc.streamChat(
+    const stream = aiSvc.startStreamChat(
       aiSvc.buildRequest({
         baseUrl: provider.baseUrl,
         apiKey: provider.apiKey,
@@ -1777,10 +1811,12 @@ async function askAiToQuestion(msg: EditorChatMessage) {
         aiStreamingText.value += chunk
       }
     )
-    if (full) {
+    currentStreamCancel = stream.cancel
+    const full = await stream.promise
+    if (full && !stopFlag.value) {
       const parsed = parseQuestionBlock(full)
       if (parsed) {
-        pushMsg({
+        await pushMsg({
           role: 'assistant',
           content: parsed.question,
           options: parsed.options,
@@ -1788,7 +1824,7 @@ async function askAiToQuestion(msg: EditorChatMessage) {
         })
       } else {
         // 没解析出来，把原文当普通消息
-        pushMsg({ role: 'assistant', content: full })
+        await pushMsg({ role: 'assistant', content: full })
       }
     }
   } catch (e: any) {
@@ -1796,6 +1832,7 @@ async function askAiToQuestion(msg: EditorChatMessage) {
   } finally {
     generating.value = false
     aiStreamingText.value = ''
+    currentStreamCancel = null
   }
 }
 
@@ -1835,9 +1872,15 @@ function replaceOutput(text: string) {
 }
 
 /** 删除某条消息 */
-function deleteMsg(index: number) {
+async function deleteMsg(index: number) {
   if (index < 0 || index >= chatMessages.value.length) return
-  chatMessages.value.splice(index, 1)
+  const [removed] = chatMessages.value.splice(index, 1)
+  try {
+    await db.Messages.remove(removed.id)
+  } catch (e: any) {
+    chatMessages.value.splice(index, 0, removed)
+    ElMessage.error('删除消息失败：' + (e?.message || '未知错误'))
+  }
 }
 
 /** 重新生成：找到对应的用户消息，把它重新塞回输入框并触发发送，同时删除当前 AI 消息 */
@@ -1862,7 +1905,14 @@ async function regenerateMsg(index: number) {
   const skillMatch = rawInput.match(/^\[技能：[^\]]+\]\s*\n?([\s\S]*)$/)
   if (skillMatch) rawInput = skillMatch[1]
   // 删除从 user 消息到当前 AI 消息之间的所有消息
-  chatMessages.value.splice(userIdx, index - userIdx + 1)
+  const removed = chatMessages.value.splice(userIdx, index - userIdx + 1)
+  try {
+    await Promise.all(removed.map(message => db.Messages.remove(message.id)))
+  } catch (e: any) {
+    chatMessages.value.splice(userIdx, 0, ...removed)
+    ElMessage.error('清理旧回答失败：' + (e?.message || '未知错误'))
+    return
+  }
   // 重新填入输入框触发发送
   userInput.value = rawInput
   await nextTick()
@@ -2047,10 +2097,27 @@ onBeforeUnmount(async () => {
   editor.value?.destroy()
 })
 
+async function allowNavigationAfterSave(): Promise<boolean> {
+  const saved = await save({ silent: true })
+  if (saved) return true
+  try {
+    await ElMessageBox.confirm('当前章节保存失败，继续离开可能丢失修改。仍要离开吗？', '保存失败', {
+      type: 'warning', confirmButtonText: '仍要离开', cancelButtonText: '留在本页'
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+onBeforeRouteLeave(() => allowNavigationAfterSave())
+onBeforeRouteUpdate(async (to, from) => {
+  if (to.params.chapterId === from.params.chapterId) return true
+  return allowNavigationAfterSave()
+})
+
 watch(() => route.params.chapterId, async (id) => {
   if (id && id !== currentChapterId.value) {
-    // 切换章节前静默保存
-    await save({ silent: true })
     await loadChapter(id as string)
     // 切章节后加载该章节的对话历史
     await loadChatHistory()

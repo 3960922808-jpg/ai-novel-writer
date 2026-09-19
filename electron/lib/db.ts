@@ -46,12 +46,48 @@ const ARRAY_COLLECTIONS: (keyof DBShape)[] = [
 ]
 
 let db: Awaited<ReturnType<typeof JSONFilePreset<DBShape>>> | null = null
+let dbFilePath = ''
+let writeQueue: Promise<void> = Promise.resolve()
+
+function isValidDatabaseFile(filePath: string): boolean {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'))
+    return !!parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+  } catch {
+    return false
+  }
+}
+
+function recoverDatabaseIfNeeded(filePath: string) {
+  if (!fs.existsSync(filePath) || isValidDatabaseFile(filePath)) return
+  const backupPath = `${filePath}.bak`
+  if (fs.existsSync(backupPath) && isValidDatabaseFile(backupPath)) {
+    const brokenPath = `${filePath}.corrupt-${Date.now()}`
+    fs.copyFileSync(filePath, brokenPath)
+    fs.copyFileSync(backupPath, filePath)
+    console.warn('[db] 主数据库损坏，已从备份恢复；损坏文件保留在:', brokenPath)
+    return
+  }
+  throw new Error(`数据库文件损坏且没有可用备份：${filePath}`)
+}
+
+/** 串行写入并维护最近一次完整备份，避免并发写入和异常退出破坏数据库。 */
+export function writeDB(): Promise<void> {
+  writeQueue = writeQueue.catch(() => {}).then(async () => {
+    if (!db || !dbFilePath) throw new Error('DB not initialized')
+    await db.write()
+    fs.copyFileSync(dbFilePath, `${dbFilePath}.bak`)
+  })
+  return writeQueue
+}
 
 export async function initDB() {
   const userData = app.getPath('userData')
   const dbDir = path.join(userData, 'ainovelwriter')
   if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true })
   const dbFile = path.join(dbDir, 'db.json')
+  recoverDatabaseIfNeeded(dbFile)
+  dbFilePath = dbFile
   db = await JSONFilePreset<DBShape>(dbFile, defaultData)
   // 修复老版本 db：只补齐数组集合（避免 .filter undefined 崩溃）。
   // settings 是对象，不能与集合一起按数组初始化。
@@ -153,7 +189,7 @@ export async function initDB() {
       console.log('[settings] v1.4.2: 已自动迁移老 provider 的过期模型名到最新版本')
     }
   }
-  await db.write()
+  await writeDB()
   // 初始化内置提示词
   await seedBuiltInPrompts()
   // 初始化内置技能
@@ -289,7 +325,7 @@ async function seedBuiltInPrompts() {
     }
   }
   if (changed) {
-    await db.write()
+    await writeDB()
   }
 }
 
@@ -427,5 +463,5 @@ async function seedBuiltInSkills() {
       changed = true
     }
   }
-  if (changed) await db.write()
+  if (changed) await writeDB()
 }

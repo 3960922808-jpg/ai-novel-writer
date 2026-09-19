@@ -194,10 +194,18 @@ async function onDrop(targetIndex: number) {
 }
 
 async function remove(c: Chapter) {
-  await ElMessageBox.confirm(`删除《${c.title}》？`, '确认', { type: 'warning' })
-  await db.Chapters.remove(c.id)
-  await projectStore.reloadChapters()
-  ElMessage.success('已删除')
+  try {
+    await ElMessageBox.confirm(`删除《${c.title}》？`, '确认', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    await db.Chapters.remove(c.id)
+    await projectStore.reloadChapters()
+    ElMessage.success('已删除')
+  } catch (e: any) {
+    ElMessage.error('删除失败：' + (e?.message || '未知错误'))
+  }
 }
 
 async function aiSummary(c: Chapter) {

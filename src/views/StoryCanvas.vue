@@ -279,7 +279,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive, watch } from 'vue'
+import { ref, computed, reactive, watch, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -303,6 +303,7 @@ const CANVAS_H = 2000
 
 const nodes = ref<CanvasNode[]>([])
 const canvasRef = ref<HTMLElement | null>(null)
+let cleanupNodeDrag: (() => void) | null = null
 const dialogVisible = ref(false)
 
 // 连线模式
@@ -559,9 +560,14 @@ function startDrag(e: MouseEvent, node: CanvasNode) {
     node.x = Math.max(0, ev.clientX - startX)
     node.y = Math.max(0, ev.clientY - startY)
   }
-  const onUp = async () => {
+  cleanupNodeDrag?.()
+  const cleanup = () => {
     document.removeEventListener('mousemove', onMove)
     document.removeEventListener('mouseup', onUp)
+    if (cleanupNodeDrag === cleanup) cleanupNodeDrag = null
+  }
+  const onUp = async () => {
+    cleanup()
     // 只有真的拖动了才保存，避免误触
     if (moved) {
       try {
@@ -573,7 +579,14 @@ function startDrag(e: MouseEvent, node: CanvasNode) {
   }
   document.addEventListener('mousemove', onMove)
   document.addEventListener('mouseup', onUp)
+  cleanupNodeDrag = cleanup
 }
+
+onBeforeUnmount(() => {
+  cleanupNodeDrag?.()
+  dragFrom.value = null
+  dragLine.value = ''
+})
 
 // 开始连线拖拽
 function startConnect(e: MouseEvent, node: CanvasNode, side: 'left' | 'right') {

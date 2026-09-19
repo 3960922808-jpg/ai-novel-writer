@@ -2,7 +2,7 @@ import { dialog, ipcMain, shell } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { getDB } from '../lib/db'
+import { getDB, writeDB } from '../lib/db'
 
 const ROOT_FOLDER = 'TrmWrite'
 
@@ -103,7 +103,7 @@ async function exportProject(projectId: string) {
 
   const chapterLinks: string[] = ['# 章节索引', '']
   for (const chapter of chapters) {
-    const file = `${String(chapter.order + 1).padStart(4, '0')}-${safeName(chapter.title)}.md`
+    const file = `${String(chapter.order).padStart(4, '0')}-${safeName(chapter.title)}.md`
     chapterLinks.push(`- [[${file.replace(/\.md$/, '')}|${chapter.title}]] · ${chapter.wordCount || 0} 字`)
     await writeNote(path.join(root, '章节', file), note({
       'trmwrite-type': 'chapter', 'trmwrite-id': chapter.id, order: chapter.order, status: chapter.status
@@ -172,7 +172,7 @@ async function importMemory(projectId: string) {
     }
     imported++
   }
-  if (imported) await db.write()
+  if (imported) await writeDB()
   return { imported, skipped, folder, importedAt: Date.now() }
 }
 
@@ -183,7 +183,7 @@ export function registerObsidianIPC() {
     const vaultPath = result.filePaths[0]
     const db = getDB()
     db.data.settings = { ...(db.data.settings || {}), obsidianVaultPath: vaultPath }
-    await db.write()
+    await writeDB()
     return vaultPath
   })
   ipcMain.handle('obsidian:status', async (_event, projectId: string) => {
@@ -208,7 +208,8 @@ export function registerObsidianIPC() {
     await validateVault(vaultPath)
     const root = getProjectRoot(vaultPath, project)
     await fs.mkdir(root, { recursive: true })
-    shell.showItemInFolder(path.join(root, '项目主页.md'))
+    const error = await shell.openPath(root)
+    if (error) throw new Error('打开 Obsidian 项目目录失败：' + error)
     return root
   })
 }

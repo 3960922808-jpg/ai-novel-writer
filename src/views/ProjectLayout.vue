@@ -46,7 +46,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   EditPen, DataAnalysis, Document, Edit, User,
@@ -98,23 +98,31 @@ function navTarget(name: string) {
     : { name: 'chapters' }
 }
 
-onMounted(async () => {
-  const id = route.params.id as string
-  if (!id) { router.push('/'); return }
+async function loadProject(id: string) {
+  if (!id) {
+    projectStore.clear()
+    await router.push('/')
+    return
+  }
+  loading.value = true
   try {
     const ok = await projectStore.loadProject(id)
     if (!ok) {
       ElMessage.error('项目不存在')
-      router.push('/')
+      projectStore.clear()
+      await router.push('/')
     }
   } catch (e: any) {
     console.error(e)
     ElMessage.error('加载项目失败：' + (e.message || ''))
-    router.push('/')
+    projectStore.clear()
+    await router.push('/')
   } finally {
     loading.value = false
   }
-})
+}
+
+watch(() => String(route.params.id || ''), loadProject, { immediate: true })
 
 function goHome() {
   router.push('/')
