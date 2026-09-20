@@ -194,6 +194,12 @@
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
+                  <el-dropdown-item command="nvidia">
+                    <div class="quick-item">
+                      <div class="quick-name">英伟达开发者免费端点</div>
+                      <div class="quick-desc text-faint text-xs">NVIDIA NIM · 自动获取当前可用模型</div>
+                    </div>
+                  </el-dropdown-item>
                   <el-dropdown-item command="openai">
                     <div class="quick-item">
                       <div class="quick-name">OpenAI</div>
@@ -244,6 +250,15 @@
         <div class="text-faint text-xs" style="margin-bottom: 12px">
           模型只能通过下方 API 配置管理。<span style="color: var(--text-2)">支持同时保留多个 Provider 与模型配置，互不影响</span> —— 第一个「已就绪」（填了 API Key 且有模型）的将作为默认使用。
           支持任意 OpenAI 兼容接口，可直接填入<span style="color: var(--text-2)">中转站</span>地址与对应 Key。
+        </div>
+
+        <div class="public-model-notice">
+          <div class="public-model-copy">
+            <strong>公益模型体验</strong>
+            <span>使用英伟达官方开发者免费端点。需要自行申请免费的 NVIDIA API Key；免费额度、速率和模型会随官方政策变化，不内置共享密钥。</span>
+          </div>
+          <el-button round type="primary" plain @click="quickAddProvider('nvidia')">添加英伟达免费端点</el-button>
+          <el-button round @click="openExternal('https://build.nvidia.com/explore')">申请免费 Key</el-button>
         </div>
 
         <!-- 可用模型总览：直观展示多个模型共存 -->
@@ -658,6 +673,10 @@ function openReleases() {
   window.open(url, '_blank')
 }
 
+function openExternal(url: string) {
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
 const modelInputVisible = ref<Record<number, boolean>>({})
 const modelInputValue = ref<Record<number, string>>({})
 const modelInputRefs = ref<any[] | null>(null)
@@ -703,6 +722,15 @@ interface ProviderPreset {
 }
 
 const PROVIDER_PRESETS: ProviderPreset[] = [
+  {
+    key: 'nvidia',
+    label: '英伟达开发者免费端点',
+    provider: 'NVIDIA 免费端点',
+    baseUrl: 'https://integrate.api.nvidia.com/v1',
+    // 仅保留一个已由英伟达官方示例公开的兜底模型；连接测试会从 /models 自动补全当前列表。
+    models: ['mistralai/mistral-nemotron'],
+    website: 'https://build.nvidia.com/explore'
+  },
   {
     key: 'openai',
     label: 'OpenAI',
@@ -789,7 +817,7 @@ function quickAddProvider(cmd: string) {
     apiKey: '',
     models: [...preset.models]
   })
-  ElMessage.success(`已添加 ${preset.label} 预设，请填写 API Key。申请地址：${preset.website}`)
+  ElMessage.success(`已添加 ${preset.label} 预设，请填写 API Key 后点击“测试连通性”自动获取模型`)
 }
 
 // 添加自定义 Provider
@@ -1414,6 +1442,28 @@ html.dark .preview-body { background: rgba(30,41,59,var(--preview-panel-opacity)
   border-radius: var(--radius);
   margin-bottom: 14px;
   background: var(--panel-2);
+}
+.public-model-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
+  border-radius: 18px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 9%, var(--panel)), var(--panel));
+}
+.public-model-copy {
+  display: flex;
+  flex: 1;
+  min-width: 240px;
+  flex-direction: column;
+  gap: 4px;
+}
+.public-model-copy strong { color: var(--text); font-size: 14px; }
+.public-model-copy span { color: var(--text-3); font-size: 12px; line-height: 1.55; }
+@media (max-width: 760px) {
+  .public-model-notice { align-items: stretch; flex-direction: column; }
 }
 .provider-card:last-child {
   margin-bottom: 0;

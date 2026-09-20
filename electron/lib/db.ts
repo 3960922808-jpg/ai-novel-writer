@@ -492,6 +492,26 @@ async function seedBuiltInSkills() {
       updatedAt: now
     },
     {
+      id: 'skill-inspiration-collision',
+      projectId: 'global',
+      name: '灵感碰撞室',
+      description: '让多个立场不同的创作编辑围绕一个卡点互相质疑，产出真正有差异的剧情方案',
+      category: '构思',
+      icon: 'Lightning',
+      systemPrompt:
+        '你是一场小说创作圆桌的主持人。参与者包括：重视因果的剧情编辑、重视人物选择的人物编辑、重视读者情绪的网文编辑、专门反对套路的逆向编辑。四人必须基于用户已经确定的设定展开，不得偷偷改前提。先各自给一个互不重复的方案，再让他们互相指出致命问题，最后主持人综合出一个可执行方案。不要只换词复述同一个点子。',
+      userPrompt:
+        '请围绕下面的创作卡点进行灵感碰撞。输出顺序：①四个差异明确的方案 ②交叉质疑 ③推荐方案及理由 ④可以直接写进下一章的三个场景节点。\n\n已有设定与上下文：{{context}}\n当前卡点或目标：{{instruction}}',
+      variables: ['context', 'instruction'],
+      recommendedModel: '',
+      temperature: 0.9,
+      maxTokens: 4096,
+      tags: ['灵感', '卡文', '脑暴', '剧情方案'],
+      isBuiltIn: true,
+      createdAt: now,
+      updatedAt: now
+    },
+    {
       id: 'skill-novel-concept',
       projectId: 'global',
       name: '小说立项与主题',

@@ -173,6 +173,7 @@
             </div>
             <div class="summary-right">
               <el-button text size="small" :icon="MagicStick" :loading="generating" @click="generateSummary">总结当前章节</el-button>
+              <el-button text size="small" :icon="DataAnalysis" :loading="organizingChapter" @click="organizeChapter">整理本章资料</el-button>
               <el-button text size="small" @click="batchSummary">批量生成概要 &gt;</el-button>
             </div>
             <div class="summary-content" v-if="chapter.summary">{{ chapter.summary }}</div>
@@ -596,6 +597,21 @@
       </div>
       <el-empty v-if="!linkedItems.length && !pendingSkill?.referenceFiles?.length" description="本次还没有关联资料" />
     </el-dialog>
+
+    <el-dialog v-model="chapterOrganizerVisible" title="本章资料整理 · 确认后才会保存" width="720px" append-to-body>
+      <div class="organizer-tip">AI 只生成候选资料。你可以逐项修改，点击保存后才会写入章节概要与长期记忆，并供后续对话自动引用。</div>
+      <el-form label-position="top" class="organizer-form">
+        <el-form-item label="章节摘要"><el-input v-model="chapterDraft.summary" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item label="人物状态与关系变化"><el-input v-model="chapterDraft.characters" type="textarea" :rows="4" placeholder="没有变化时填写“无”" /></el-form-item>
+        <el-form-item label="新增或变更的世界设定"><el-input v-model="chapterDraft.world" type="textarea" :rows="4" placeholder="没有变化时填写“无”" /></el-form-item>
+        <el-form-item label="新埋伏笔与待回收悬念"><el-input v-model="chapterDraft.hooks" type="textarea" :rows="4" placeholder="没有变化时填写“无”" /></el-form-item>
+        <el-form-item label="连续性风险"><el-input v-model="chapterDraft.risks" type="textarea" :rows="3" placeholder="仅记录需要后续核对的风险" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button round @click="chapterOrganizerVisible = false">暂不保存</el-button>
+        <el-button round type="primary" :loading="savingChapterFacts" @click="saveChapterOrganization">确认并写入长期记忆</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -648,6 +664,10 @@ const searchKeyword = ref('')
 const searchMatches = ref(0)
 const activeChatSessionId = ref('')
 const historyVisible = ref(false)
+const chapterOrganizerVisible = ref(false)
+const organizingChapter = ref(false)
+const savingChapterFacts = ref(false)
+const chapterDraft = ref({ summary: '', characters: '', world: '', hooks: '', risks: '' })
 
 const chatHistoryList = ref<Array<{ id: string; chapterId: string; title: string; time: number; count: number }>>([])
 
@@ -2218,6 +2238,119 @@ async function generateSummary() {
   }
 }
 
+function normalizeOrganizerField(value: unknown): string {
+  if (Array.isArray(value)) return value.map(v => `- ${String(v)}`).join('\n')
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+/**
+ * 生成可审核的章节资料，不直接落库。这样模型判断错误时不会污染人物与设定记忆。
+ */
+async function organizeChapter() {
+  if (!chapter.value || !project.value) return
+  const provider = getProvider()
+  if (!provider?.apiKey) {
+    ElMessage.warning('请先在设置中配置可用模型与 API Key')
+    return
+  }
+  const fullText = editor.value?.getText().trim() || ''
+  if (!fullText) {
+    ElMessage.warning('当前章节还没有正文')
+    return
+  }
+  organizingChapter.value = true
+  try {
+    const existingMemory = contextTruths.value
+      .filter(item => ['character_matrix', 'current_state', 'pending_hooks'].includes(item.key))
+      .map(item => `【${item.title}】\n${item.content}`)
+      .join('\n\n')
+      .slice(0, 12000)
+    const result = await aiSvc.streamChat(
+      aiSvc.buildRequest({
+        baseUrl: provider.baseUrl,
+        apiKey: provider.apiKey,
+        model: aiModel.value || project.value.settings.model,
+        temperature: 0.25,
+        maxTokens: 1800,
+        messages: [
+          {
+            role: 'system',
+            content: '你是严谨的长篇小说资料编辑。只提取本章正文明确出现或可以直接推断的信息，不得擅自补设定。返回严格 JSON，不要代码块和解释。字段必须为 summary、characters、world、hooks、risks；每个字段均为字符串，可用 Markdown 列表。summary 不超过 240 字；没有内容的字段写“无”。'
+          },
+          {
+            role: 'user',
+            content: `项目：${project.value.title}\n章节：第${chapter.value.order}章《${chapter.value.title}》\n\n已有长期记忆（用于比对变化）：\n${existingMemory || '暂无'}\n\n本章正文：\n${fullText.slice(0, 50000)}`
+          }
+        ]
+      }),
+      () => {}
+    )
+    const jsonText = result.match(/\{[\s\S]*\}/)?.[0]
+    if (!jsonText) throw new Error('模型未返回可识别的结构化资料，请重试')
+    const parsed = JSON.parse(jsonText)
+    chapterDraft.value = {
+      summary: normalizeOrganizerField(parsed.summary),
+      characters: normalizeOrganizerField(parsed.characters),
+      world: normalizeOrganizerField(parsed.world),
+      hooks: normalizeOrganizerField(parsed.hooks),
+      risks: normalizeOrganizerField(parsed.risks)
+    }
+    chapterOrganizerVisible.value = true
+  } catch (e: any) {
+    ElMessage.error('整理失败：' + (e?.message || '未知错误'))
+  } finally {
+    organizingChapter.value = false
+  }
+}
+
+function replaceChapterMemory(content: string, heading: string, body: string): string {
+  const start = `<!-- ${heading}:start -->`
+  const end = `<!-- ${heading}:end -->`
+  const block = `${start}\n### ${heading}\n${body.trim() || '无'}\n${end}`
+  const from = content.indexOf(start)
+  const to = content.indexOf(end)
+  if (from >= 0 && to >= from) {
+    return `${content.slice(0, from)}${block}${content.slice(to + end.length)}`.trim()
+  }
+  return `${content.trim()}${content.trim() ? '\n\n' : ''}${block}`
+}
+
+async function saveChapterOrganization() {
+  if (!chapter.value || !project.value) return
+  savingChapterFacts.value = true
+  try {
+    chapter.value.summary = chapterDraft.value.summary.trim()
+    await db.Chapters.save(chapter.value)
+
+    const heading = `第${chapter.value.order}章《${chapter.value.title}》`
+    const targets = [
+      { key: 'character_matrix', title: '人物状态与关系', body: chapterDraft.value.characters },
+      { key: 'current_state', title: '世界设定与当前状态', body: chapterDraft.value.world },
+      { key: 'pending_hooks', title: '待回收伏笔', body: chapterDraft.value.hooks },
+      { key: 'continuity_risks', title: '连续性风险', body: chapterDraft.value.risks }
+    ]
+    for (const target of targets) {
+      const current = contextTruths.value.find(item => item.key === target.key)
+      const saved = await db.Truths.save({
+        ...(current || {}),
+        projectId: project.value.id,
+        key: target.key,
+        title: current?.title || target.title,
+        content: replaceChapterMemory(current?.content || '', heading, target.body)
+      })
+      const index = contextTruths.value.findIndex(item => item.key === target.key)
+      if (index >= 0) contextTruths.value[index] = saved
+      else contextTruths.value.push(saved)
+    }
+    chapterOrganizerVisible.value = false
+    ElMessage.success('本章概要与长期记忆已保存，后续 AI 对话会自动引用')
+  } catch (e: any) {
+    ElMessage.error('保存失败：' + (e?.message || '未知错误'))
+  } finally {
+    savingChapterFacts.value = false
+  }
+}
+
 function batchSummary() {
   ElMessage.info('批量生成概要：已切换到章节列表，可逐章点击生成')
   router.push({ name: 'chapters' })
@@ -2349,6 +2482,19 @@ watch(() => route.params.chapterId, async (id) => {
 </script>
 
 <style scoped>
+.organizer-tip {
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.6;
+  border: 1px solid color-mix(in srgb, var(--primary) 25%, var(--border));
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--primary) 7%, var(--panel));
+}
+.organizer-form :deep(.el-form-item) { margin-bottom: 15px; }
+.organizer-form :deep(.el-form-item__label) { color: var(--text); font-weight: 600; }
+.organizer-form :deep(.el-textarea__inner) { border-radius: 14px; line-height: 1.65; }
 .editor-root {
   height: 100vh;
   display: flex;
