@@ -1,8 +1,12 @@
 <template>
   <Transition name="splash-fade">
-    <div v-if="visible" class="startup-splash" role="status" aria-live="polite" :aria-label="statusText">
+    <div v-if="visible" class="startup-splash" :class="{ 'is-ready': displayProgress === 100 }" role="status" aria-live="polite" :aria-label="statusText">
+      <div class="paper-lines" aria-hidden="true"></div>
+      <div class="soft-aura" aria-hidden="true"></div>
       <main class="splash-content">
+        <div class="brand-eyebrow" aria-hidden="true"><i></i><span>LONGFORM STORY STUDIO</span><i></i></div>
         <div class="wordmark-wrap" aria-hidden="true">
+          <div class="wordmark-ghost">TrmWrite</div>
           <div class="wordmark">TrmWrite</div>
           <span class="wordmark-dot"></span>
         </div>
@@ -13,11 +17,18 @@
           <div class="progress-track">
             <div class="progress-fill" :style="{ width: `${displayProgress}%` }">
               <span class="progress-light"></span>
+              <span class="progress-head"></span>
             </div>
           </div>
           <div class="loading-meta">
             <span>{{ statusText }}</span>
             <span class="loading-number">{{ displayProgress }}%</span>
+          </div>
+          <div class="progress-stages" aria-hidden="true">
+            <span :class="{ active: displayProgress >= 18 }"></span>
+            <span :class="{ active: displayProgress >= 45 }"></span>
+            <span :class="{ active: displayProgress >= 72 }"></span>
+            <span :class="{ active: displayProgress >= 96 }"></span>
           </div>
         </div>
 
@@ -34,11 +45,11 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const props = defineProps<{ ready?: boolean }>()
 
-const version = '2.2.0'
+const version = '2.2.1'
 const visible = ref(true)
 const progress = ref(4)
 const startedAt = Date.now()
-const minimumDuration = 2100
+const minimumDuration = 2350
 let progressTimer: ReturnType<typeof setInterval> | undefined
 let finishTimer: ReturnType<typeof setTimeout> | undefined
 let safetyTimer: ReturnType<typeof setTimeout> | undefined
@@ -58,7 +69,7 @@ function scheduleFinish() {
   progress.value = Math.max(progress.value, 88)
   finishTimer = setTimeout(() => {
     progress.value = 100
-    finishTimer = setTimeout(finish, 280)
+    finishTimer = setTimeout(finish, 480)
   }, remaining)
 }
 
@@ -111,6 +122,25 @@ onBeforeUnmount(() => {
   font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
+.paper-lines {
+  position: absolute;
+  inset: 0;
+  opacity: .42;
+  background: repeating-linear-gradient(to bottom, transparent 0, transparent 47px, rgba(80, 85, 92, .027) 48px);
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at center, #000 0%, transparent 72%);
+  mask-image: radial-gradient(ellipse 70% 60% at center, #000 0%, transparent 72%);
+}
+.soft-aura {
+  position: absolute;
+  width: min(760px, 82vw);
+  height: min(420px, 52vw);
+  border: 1px solid rgba(80, 84, 90, .035);
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(80, 84, 90, .026), transparent 66%);
+  transform: rotate(-8deg);
+  animation: aura-enter 1.4s cubic-bezier(.2,.75,.2,1) both;
+}
+
 .startup-splash::before,
 .startup-splash::after {
   content: '';
@@ -139,6 +169,8 @@ onBeforeUnmount(() => {
 }
 
 .splash-content {
+  position: relative;
+  z-index: 2;
   width: min(460px, 78vw);
   display: flex;
   flex-direction: column;
@@ -146,7 +178,34 @@ onBeforeUnmount(() => {
   transform: translateY(-1.5vh);
 }
 
+.brand-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 19px;
+  color: #b5b8bc;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: .27em;
+  animation: rise-in .65s .05s ease-out both;
+}
+.brand-eyebrow i { display: block; width: 24px; height: 1px; background: #dfe1e3; }
+
 .wordmark-wrap { position: relative; animation: wordmark-in .9s cubic-bezier(.2,.78,.2,1) both; }
+.wordmark-ghost {
+  position: absolute;
+  inset: 0;
+  color: transparent;
+  font-family: 'Arial Rounded MT Bold', 'Segoe UI Rounded', 'Segoe UI', sans-serif;
+  font-size: clamp(54px, 7vw, 78px);
+  font-weight: 750;
+  font-style: italic;
+  line-height: 1;
+  letter-spacing: -.065em;
+  -webkit-text-stroke: 1px rgba(92, 96, 102, .09);
+  transform: translate(8px, 7px) skewX(-5deg);
+  filter: blur(.2px);
+}
 .wordmark {
   color: #64686e;
   font-family: 'Arial Rounded MT Bold', 'Segoe UI Rounded', 'Segoe UI', 'PingFang SC', sans-serif;
@@ -198,6 +257,18 @@ onBeforeUnmount(() => {
   box-shadow: 0 2px 7px rgba(60, 64, 70, .16);
   transition: width .2s cubic-bezier(.25,.8,.25,1);
 }
+.progress-head {
+  position: absolute;
+  top: 50%;
+  right: 1px;
+  width: 5px;
+  height: 5px;
+  border: 2px solid rgba(255,255,255,.72);
+  border-radius: 50%;
+  background: #777c82;
+  box-shadow: 0 0 0 4px rgba(255,255,255,.18), 0 2px 7px rgba(42,46,51,.25);
+  transform: translateY(-50%);
+}
 .progress-light {
   position: absolute;
   inset: 0;
@@ -219,6 +290,9 @@ onBeforeUnmount(() => {
   letter-spacing: .12em;
 }
 .loading-number { color: #858990; font-variant-numeric: tabular-nums; letter-spacing: .04em; }
+.progress-stages { display: flex; justify-content: space-between; padding: 0 4px; margin-top: 12px; }
+.progress-stages span { width: 4px; height: 4px; border-radius: 50%; background: #e1e3e5; transition: background .35s ease, transform .35s ease, box-shadow .35s ease; }
+.progress-stages span.active { background: #858a90; box-shadow: 0 0 0 3px rgba(133,138,144,.08); transform: scale(1.12); }
 
 .skip-button {
   margin-top: 25px;
@@ -248,23 +322,34 @@ onBeforeUnmount(() => {
   animation: rise-in .8s .75s ease-out both;
 }
 
+.startup-splash.is-ready .wordmark { animation: ready-wordmark .48s ease-out both; }
+.startup-splash.is-ready .wordmark-dot { animation: ready-dot .48s ease-out both; }
+.startup-splash.is-ready .progress-fill { background: linear-gradient(100deg, #aeb2b7, #686d73 60%, #92979c); }
+
 .splash-fade-leave-active {
   pointer-events: none;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,.1) 15%, #000 42%, #000 100%);
   mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,.1) 15%, #000 42%, #000 100%);
   -webkit-mask-size: 100% 260%;
   mask-size: 100% 260%;
-  animation: splash-gradient-away .78s cubic-bezier(.55,.05,.25,1) both;
+  animation: splash-gradient-away .92s cubic-bezier(.55,.05,.25,1) both;
 }
 .splash-fade-leave-active .splash-content,
-.splash-fade-leave-active .version { transition: opacity .38s ease, transform .5s ease; }
-.splash-fade-leave-to .splash-content { opacity: 0; transform: translateY(-12px) scale(.985); }
+.splash-fade-leave-active .version { transition: opacity .48s ease, transform .68s cubic-bezier(.3,.7,.2,1), filter .58s ease; }
+.splash-fade-leave-active .paper-lines,
+.splash-fade-leave-active .soft-aura { transition: opacity .65s ease, transform .85s ease; }
+.splash-fade-leave-to .splash-content { opacity: 0; transform: translateY(-16px) scale(1.018); filter: blur(3px); }
 .splash-fade-leave-to .version { opacity: 0; }
+.splash-fade-leave-to .paper-lines { opacity: 0; transform: translateY(-22px); }
+.splash-fade-leave-to .soft-aura { opacity: 0; transform: rotate(-8deg) scale(1.18); }
 
 @keyframes wordmark-in {
   from { opacity: 0; transform: translateY(16px) scale(.96); filter: blur(5px); }
   to { opacity: 1; transform: none; filter: blur(0); }
 }
+@keyframes aura-enter { from { opacity: 0; transform: rotate(-8deg) scale(.8); } to { opacity: 1; transform: rotate(-8deg) scale(1); } }
+@keyframes ready-wordmark { 0% { transform: skewX(-5deg); } 48% { color: #555a60; transform: translateY(-2px) skewX(-5deg); text-shadow: 0 12px 28px rgba(54,58,64,.12); } 100% { transform: skewX(-5deg); } }
+@keyframes ready-dot { 0% { opacity: .6; transform: scale(.8); } 52% { opacity: 1; transform: scale(1.55); box-shadow: 0 0 0 8px rgba(120,125,131,.08); } 100% { opacity: 1; transform: scale(1); } }
 @keyframes rise-in { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
 @keyframes progress-shine { 0%, 20% { transform: translateX(-130%); } 75%, 100% { transform: translateX(280%); } }
 @keyframes dot-breathe { 0%, 100% { opacity: .55; transform: scale(.82); } 50% { opacity: 1; transform: scale(1); } }
