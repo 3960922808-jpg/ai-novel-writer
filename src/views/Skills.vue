@@ -185,6 +185,26 @@
         <el-button type="primary" :loading="saving" @click="saveSkill">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="batchImportVisible" title="选择要加入的技能" width="680px" :close-on-click-modal="false">
+      <div class="batch-import-tip">这个技能包里有 {{ importChoices.length }} 个技能。已优先勾选能在写作对话中直接工作的项目；依赖浏览器、脚本或图片模型的技能暂不默认选择。</div>
+      <el-checkbox-group v-model="selectedImportNames" class="batch-skill-list">
+        <label v-for="item in importChoices" :key="item.name" class="batch-skill-item">
+          <el-checkbox :value="item.name" />
+          <div>
+            <strong>{{ item.displayName || item.name }}</strong>
+            <p>{{ item.description || '暂无说明' }}</p>
+            <span v-if="item.referenceFiles?.length">随附 {{ item.referenceFiles.length }} 份参考资料</span>
+          </div>
+        </label>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="batchImportVisible = false">取消</el-button>
+        <el-button type="primary" :loading="batchImporting" :disabled="selectedImportNames.length === 0" @click="confirmBatchImport">
+          加入已选的 {{ selectedImportNames.length }} 个技能
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -288,6 +308,10 @@ const editVisible = ref(false)
 const saving = ref(false)
 const tagInput = ref('')
 const editing = ref<Skill>(emptySkill())
+const batchImportVisible = ref(false)
+const batchImporting = ref(false)
+const importChoices = ref<any[]>([])
+const selectedImportNames = ref<string[]>([])
 
 function emptySkill(): Skill {
   return {
@@ -393,14 +417,14 @@ function removeReference(name: string) {
   editing.value.referenceFiles = (editing.value.referenceFiles || []).filter(file => file.name !== name)
 }
 
-function applyImportedSkill(data: any, sourceLabel: string) {
+function makeImportedSkill(data: any): Skill {
   const sys = String(data?.systemPrompt || '').trim()
   const usr = String(data?.userPrompt || data?.systemPrompt || '').trim()
   if (!usr) throw new Error('没有找到可执行的提示词，请确认文件中包含 SKILL.md 或 prompt.md')
-  editing.value = {
+  return {
     id: '',
     projectId: project.value?.id || 'global',
-    name: data.name || '导入的技能',
+    name: data.displayName || data.name || '导入的技能',
     description: data.description || '',
     category: data.category || '导入',
     icon: 'MagicStick',
@@ -420,6 +444,10 @@ function applyImportedSkill(data: any, sourceLabel: string) {
     createdAt: 0,
     updatedAt: 0
   }
+}
+
+function applyImportedSkill(data: any, sourceLabel: string) {
+  editing.value = makeImportedSkill(data)
   tagInput.value = ''
   editVisible.value = true
   const referenceTip = editing.value.referenceFiles?.length
@@ -428,12 +456,58 @@ function applyImportedSkill(data: any, sourceLabel: string) {
   ElMessage.success(`已从${sourceLabel}导入「${editing.value.name}」${referenceTip}，检查后点击保存`)
 }
 
+const RECOMMENDED_NOVEL_SKILLS = new Set([
+  'develop-novel-concept',
+  'design-novel-characters',
+  'architect-novel-plot',
+  'write-novel-scenes',
+  'revise-novel-manuscript',
+  'story-deslop',
+  'story-long-write',
+  'story-short-write'
+])
+
+function handleImportedData(data: any, sourceLabel: string) {
+  if (!Array.isArray(data?.skills) || data.skills.length <= 1) {
+    applyImportedSkill(Array.isArray(data?.skills) ? data.skills[0] : data, sourceLabel)
+    return
+  }
+  importChoices.value = data.skills.map((item: any) => ({ ...item, displayName: item.displayName || item.name }))
+  const recommended = importChoices.value.filter(item => RECOMMENDED_NOVEL_SKILLS.has(item.name)).map(item => item.name)
+  selectedImportNames.value = recommended.length ? recommended : importChoices.value.map(item => item.name)
+  batchImportVisible.value = true
+}
+
+async function confirmBatchImport() {
+  batchImporting.value = true
+  try {
+    const selected = importChoices.value.filter(item => selectedImportNames.value.includes(item.name))
+    let imported = 0
+    for (const item of selected) {
+      const skill = makeImportedSkill(item)
+      const duplicate = skills.value.find(existing => existing.name === skill.name && !existing.isBuiltIn)
+      if (duplicate) skill.id = duplicate.id
+      const saved = await SkillsDB.save(skill)
+      const index = skills.value.findIndex(existing => existing.id === saved.id)
+      if (index >= 0) skills.value[index] = saved
+      else skills.value.push(saved)
+      imported += 1
+    }
+    batchImportVisible.value = false
+    ElMessage.success(`已加入 ${imported} 个技能。去写作页输入 / 就能选择使用。`)
+  } catch (e: any) {
+    ElMessage.error('批量导入失败：' + (e?.message || ''))
+  } finally {
+    batchImporting.value = false
+  }
+}
+
 async function importFromFile() {
   try {
     const filePath = await window.api.file.selectSkillFile()
     if (!filePath) return
     const data = await window.api.file.readSkillFile(filePath)
-    applyImportedSkill(data, filePath.toLowerCase().endsWith('.zip') ? ' ZIP 技能包' : ' Markdown 文件')
+    handleImportedData(data, filePath.toLowerCase().endsWith('.zip') ? ' ZIP 技能包' : ' Markdown 文件')
   } catch (e: any) {
     ElMessage.error('导入失败：' + (e?.message || ''))
   }
@@ -456,7 +530,7 @@ async function importFromFolder() {
       return
     }
 
-    applyImportedSkill(data, '文件夹')
+    handleImportedData(data, '文件夹')
   } catch (e: any) {
     ElMessage.error('导入失败：' + (e?.message || ''))
   }
@@ -647,6 +721,46 @@ function iconBg(s: Skill) {
   gap: 6px;
   width: 100%;
 }
+.batch-import-tip {
+  padding: 11px 13px;
+  border-radius: 12px;
+  background: var(--primary-light);
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.batch-skill-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  max-height: 460px;
+  margin-top: 12px;
+  overflow: auto;
+}
+.batch-skill-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  cursor: pointer;
+}
+.batch-skill-item:hover { border-color: var(--primary); }
+.batch-skill-item > div { min-width: 0; }
+.batch-skill-item strong { color: var(--text); font-size: 13px; }
+.batch-skill-item p {
+  display: -webkit-box;
+  margin: 4px 0;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.batch-skill-item span { color: var(--primary); font-size: 11px; }
 .param-row {
   display: flex;
   align-items: center;
@@ -654,6 +768,7 @@ function iconBg(s: Skill) {
 }
 @media (max-width: 900px) {
   .skill-guide { grid-template-columns: 1fr; }
+  .batch-skill-list { grid-template-columns: 1fr; }
   .form-explain { margin-left: 0; }
 }
 </style>

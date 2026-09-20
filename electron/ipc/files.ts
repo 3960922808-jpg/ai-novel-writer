@@ -9,7 +9,7 @@ const MAX_NOVEL_BYTES = 25 * 1024 * 1024
 const MAX_DOCX_XML_BYTES = 20 * 1024 * 1024
 const MAX_SKILL_FILE_BYTES = 2 * 1024 * 1024
 const MAX_SKILL_TOTAL_BYTES = 10 * 1024 * 1024
-const MAX_SKILL_FILES = 64
+const MAX_SKILL_FILES = 512
 const MAX_SKILL_ZIP_BYTES = 20 * 1024 * 1024
 const approvedFiles = new Set<string>()
 const approvedFolders = new Set<string>()
@@ -219,7 +219,8 @@ export function registerFileIPC() {
       }
 
       if (files.length === 0) throw new Error('技能文件中没有可读取的 Markdown 或文本资料')
-      return parseSkillBundle(files, defaultName)
+      const skills = parseSkillCollection(files, defaultName)
+      return skills.length > 1 ? { skills } : skills[0]
     } catch (e: any) {
       throw new Error('读取技能文件失败：' + e.message)
     }
@@ -235,38 +236,46 @@ export function registerFileIPC() {
   ipcMain.handle('file:read-skill-folder', async (_e, inputFolderPath: string) => {
     try {
       const folderPath = await requireApprovedFolder(inputFolderPath)
-      const entries = await fs.readdir(folderPath, { withFileTypes: true })
       const files: { name: string; path: string; content: string }[] = []
       let totalBytes = 0
-      for (const entry of entries) {
-        if (files.length >= MAX_SKILL_FILES) break
-        if (entry.isFile()) {
+      const pending = [folderPath]
+      while (pending.length && files.length < MAX_SKILL_FILES) {
+        const current = pending.shift()!
+        let entries
+        try { entries = await fs.readdir(current, { withFileTypes: true }) } catch { continue }
+        for (const entry of entries) {
+          if (files.length >= MAX_SKILL_FILES) break
+          const full = path.join(current, entry.name)
+          if (entry.isDirectory()) {
+            pending.push(full)
+            continue
+          }
+          if (!entry.isFile()) continue
           const ext = path.extname(entry.name).toLowerCase()
-          if (['.md', '.markdown', '.txt', '.json', '.yaml', '.yml'].includes(ext)) {
-            const full = path.join(folderPath, entry.name)
-            try {
-              const real = await fs.realpath(full)
-              const relative = path.relative(folderPath, real)
-              if (relative.startsWith('..') || path.isAbsolute(relative)) continue
-              const stat = await fs.stat(real)
-              if (!stat.isFile() || stat.size > MAX_SKILL_FILE_BYTES) continue
-              totalBytes += stat.size
-              if (totalBytes > MAX_SKILL_TOTAL_BYTES) throw new Error('技能文件总大小超过 10 MB 限制')
-              const buf = await fs.readFile(real)
-              let content = buf.toString('utf-8')
-              if (content.includes('\uFFFD')) {
-                const iconv = await import('iconv-lite').catch(() => null)
-                if (iconv) content = iconv.decode(buf, 'gbk')
-              }
-              files.push({ name: entry.name, path: full, content })
-            } catch {
-              // 跳过无法读取的文件
-            }
+          if (!['.md', '.markdown', '.txt', '.json', '.yaml', '.yml'].includes(ext)) continue
+          let real: string
+          let stat
+          try {
+            real = await fs.realpath(full)
+            const relative = path.relative(folderPath, real)
+            if (relative.startsWith('..') || path.isAbsolute(relative)) continue
+            stat = await fs.stat(real)
+          } catch { continue }
+          if (!stat.isFile() || stat.size > MAX_SKILL_FILE_BYTES) continue
+          totalBytes += stat.size
+          if (totalBytes > MAX_SKILL_TOTAL_BYTES) throw new Error('技能文件总大小超过 10 MB 限制')
+          try {
+            const buf = await fs.readFile(real)
+            files.push({ name: path.relative(folderPath, real).replace(/\\/g, '/'), path: real, content: await decodeText(buf) })
+          } catch {
+            // 跳过读取失败的单个文件。
           }
         }
       }
 
-      return { ...parseSkillBundle(files, path.basename(folderPath)), folderPath }
+      if (!files.length) throw new Error('文件夹中没有找到可读取的技能文件')
+      const skills = parseSkillCollection(files, path.basename(folderPath))
+      return skills.length > 1 ? { skills, folderPath } : { ...skills[0], folderPath }
     } catch (e: any) {
       throw new Error('读取 skill 文件夹失败：' + e.message)
     }
@@ -290,6 +299,22 @@ async function decodeText(buf: Buffer): Promise<string> {
 
 function baseName(fileName: string): string {
   return fileName.replace(/\\/g, '/').split('/').pop() || fileName
+}
+
+function parseSkillCollection(files: SkillSourceFile[], defaultName: string) {
+  const normalized = files.map(file => ({ ...file, name: file.name.replace(/\\/g, '/') }))
+  const entryFiles = normalized.filter(file => /^skill\.(md|markdown)$/i.test(baseName(file.name)))
+  if (entryFiles.length <= 1) return [parseSkillBundle(normalized, defaultName)]
+
+  return entryFiles.map(entry => {
+    const slash = entry.name.lastIndexOf('/')
+    const root = slash >= 0 ? entry.name.slice(0, slash + 1) : ''
+    const bundleFiles = normalized
+      .filter(file => !root || file.name.startsWith(root))
+      .map(file => ({ ...file, name: root ? file.name.slice(root.length) : file.name }))
+    const folderName = root ? root.replace(/\/$/, '').split('/').pop() || defaultName : defaultName
+    return parseSkillBundle(bundleFiles, folderName)
+  })
 }
 
 function parseSkillBundle(files: SkillSourceFile[], defaultName: string) {
@@ -369,6 +394,7 @@ function parseSkillBundle(files: SkillSourceFile[], defaultName: string) {
 
   return {
     name,
+    displayName: defaultName,
     description,
     systemPrompt,
     userPrompt,
