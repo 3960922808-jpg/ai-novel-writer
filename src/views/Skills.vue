@@ -4,18 +4,25 @@
       <div>
         <h1 class="page-title">
           <el-icon style="vertical-align: -3px; margin-right: 6px"><MagicStick /></el-icon>
-          {{ project ? '技能库（Skills）' : '全局技能库' }}
+          {{ project ? '技能库' : '全局技能库' }}
         </h1>
         <p class="text-muted text-sm" style="margin: 6px 0 0">
-          技能在「写作」页的右侧 AI 对话输入框中通过 <code class="slash-code">/</code> 触发调用。这里用于管理与编辑技能。
+          技能就是一套可重复使用的 AI 工作方法。在写作页输入 <code class="slash-code">/</code>，点选技能后即可真正带入规则和参考资料。
           <span v-if="!project">此页面只显示全局技能，项目专属技能请进入对应项目内管理。</span>
         </p>
       </div>
       <div class="flex gap-2">
         <el-button v-if="!project" :icon="ArrowLeft" @click="$router.push('/')">返回书架</el-button>
-        <el-button :icon="FolderOpened" @click="importFromFolder">从文件夹导入</el-button>
+        <el-button :icon="Upload" @click="importFromFile">导入 MD / ZIP</el-button>
+        <el-button :icon="FolderOpened" @click="importFromFolder">导入文件夹</el-button>
         <el-button type="primary" :icon="Plus" @click="openCreate">添加技能</el-button>
       </div>
+    </div>
+
+    <div class="skill-guide">
+      <div class="guide-step"><b>1</b><span><strong>添加</strong>：自己填写，或直接导入 <code>SKILL.md</code>、<code>.zip</code> 技能包。</span></div>
+      <div class="guide-step"><b>2</b><span><strong>检查</strong>：确认“AI 要遵守的规则”和“实际执行的任务”写对了。</span></div>
+      <div class="guide-step"><b>3</b><span><strong>使用</strong>：去写作页输入 <code>/</code> 选技能；参考文件会随本次请求发给 AI。</span></div>
     </div>
 
     <!-- 筛选 -->
@@ -61,6 +68,10 @@
         <div class="skill-vars" v-if="s.variables?.length">
           <el-tag v-for="v in s.variables" :key="v" size="small" effect="plain" class="var-tag" v-text="varLabel(v)" />
         </div>
+        <div v-if="s.referenceFiles?.length" class="reference-badge">
+          <el-icon><Files /></el-icon>
+          已带 {{ s.referenceFiles.length }} 份参考资料，调用时自动引用
+        </div>
         <div class="skill-footer">
           <el-button size="small" :icon="Edit" @click="openEdit(s)">编辑</el-button>
           <el-button size="small" :icon="CopyDocument" @click="duplicate(s)">复制</el-button>
@@ -84,11 +95,12 @@
       :close-on-click-modal="false"
     >
       <el-form :model="editing" label-width="100px" class="skill-form">
-        <el-form-item label="名称">
+        <div class="form-explain">把它想成一张“交给 AI 的工作单”。普通用户只需填写前四项，高级参数可以保持默认。</div>
+        <el-form-item label="技能名称">
           <el-input v-model="editing.name" placeholder="例如：硬核冷冽战斗" />
         </el-form-item>
-        <el-form-item label="描述">
-          <el-input v-model="editing.description" type="textarea" :rows="2" placeholder="一句话说明这个技能做什么" />
+        <el-form-item label="它能做什么">
+          <el-input v-model="editing.description" type="textarea" :rows="2" placeholder="例如：把选中的正文润色得更自然，但不改变剧情" />
         </el-form-item>
         <el-form-item label="分类">
           <el-input v-model="editing.category" placeholder="续写/润色/大纲/对话/场景/评审/蒸馏..." list="skill-cats" />
@@ -106,23 +118,24 @@
             </el-option>
           </el-select>
         </el-form-item>
-        <el-form-item label="System 提示">
+        <el-form-item label="AI 要遵守的规则">
           <el-input
             v-model="editing.systemPrompt"
             type="textarea"
             :rows="6"
-            placeholder="设定 AI 角色与规则，例如：你是擅长冷冽战斗描写的小说家，镜头聚焦血、汗、呼吸、骨裂..."
+            placeholder="告诉 AI 身份、边界和写作要求。例如：你是小说编辑，只改善语言，不新增人物，不改变剧情。"
           />
+          <div class="field-help">相当于长期规则。选择这个技能后，这段内容会进入本次请求的系统指令。</div>
         </el-form-item>
-        <el-form-item label="User 模板">
+        <el-form-item label="实际执行的任务">
           <el-input
             v-model="editing.userPrompt"
             type="textarea"
             :rows="6"
-            placeholder="支持 {{变量}}，例如：请根据以下信息写场景：&#10;环境：{{env}}&#10;冲突：{{cause}}"
+            placeholder="例如：请润色下面的内容：&#10;{{content}}&#10;&#10;用户补充要求：{{instruction}}"
           />
-          <div class="text-faint text-xs" style="margin-top: 4px">
-            自动识别的变量：
+          <div class="field-help">
+            可用双大括号留位置，例如 <code v-pre>{{content}}</code> 会放入正文或关联资料，<code v-pre>{{instruction}}</code> 会放入用户补充要求。已识别：
             <el-tag
               v-for="v in detectedVars"
               :key="v"
@@ -133,12 +146,20 @@
             <span v-if="detectedVars.length === 0">（暂无）</span>
           </div>
         </el-form-item>
+        <el-form-item v-if="editing.referenceFiles?.length" label="随附参考资料">
+          <div class="reference-list">
+            <el-tag v-for="file in editing.referenceFiles" :key="file.name" closable @close="removeReference(file.name)">
+              {{ file.name }} · {{ file.content.length }} 字
+            </el-tag>
+            <div class="field-help">这些资料不是摆设：调用技能时会作为“技能参考资料”附在请求里。</div>
+          </div>
+        </el-form-item>
         <el-form-item label="推荐参数">
           <div class="param-row">
             <el-input-number v-model="editing.temperature" :min="0" :max="2" :step="0.05" :precision="2" />
-            <span class="text-faint text-xs">temperature</span>
+            <span class="text-faint text-xs">创意程度</span>
             <el-input-number v-model="editing.maxTokens" :min="256" :max="8192" :step="256" />
-            <span class="text-faint text-xs">max_tokens</span>
+            <span class="text-faint text-xs">最长输出</span>
           </div>
         </el-form-item>
         <el-form-item label="标签">
@@ -175,7 +196,7 @@ import {
   Aim, ChatLineSquare, DataAnalysis,
   CopyDocument as CopyDoc, EditPen, Setting, Collection, Timer,
   Connection, Trophy, Files, Download, Search as SearchIcon,
-  Sunny, Moon, Star, Brush, Pointer, Lightning, FolderOpened, ArrowLeft
+  Sunny, Moon, Star, Brush, Pointer, Lightning, FolderOpened, ArrowLeft, Upload
 } from '@element-plus/icons-vue'
 import type { Skill } from '@/types'
 import { useProjectStore } from '@/stores/project'
@@ -283,13 +304,17 @@ function emptySkill(): Skill {
     temperature: 0.8,
     maxTokens: 2048,
     tags: [],
+    referenceFiles: [],
     isBuiltIn: false,
     createdAt: 0,
     updatedAt: 0
   }
 }
 
-const detectedVars = computed(() => extractVariables(editing.value.userPrompt))
+const detectedVars = computed(() => Array.from(new Set([
+  ...extractVariables(editing.value.systemPrompt || ''),
+  ...extractVariables(editing.value.userPrompt || '')
+])))
 
 function openCreate() {
   editing.value = emptySkill()
@@ -364,6 +389,56 @@ async function duplicate(s: Skill) {
   ElMessage.success('已复制')
 }
 
+function removeReference(name: string) {
+  editing.value.referenceFiles = (editing.value.referenceFiles || []).filter(file => file.name !== name)
+}
+
+function applyImportedSkill(data: any, sourceLabel: string) {
+  const sys = String(data?.systemPrompt || '').trim()
+  const usr = String(data?.userPrompt || data?.systemPrompt || '').trim()
+  if (!usr) throw new Error('没有找到可执行的提示词，请确认文件中包含 SKILL.md 或 prompt.md')
+  editing.value = {
+    id: '',
+    projectId: project.value?.id || 'global',
+    name: data.name || '导入的技能',
+    description: data.description || '',
+    category: data.category || '导入',
+    icon: 'MagicStick',
+    systemPrompt: sys,
+    userPrompt: usr,
+    variables: Array.from(new Set([...extractVariables(sys), ...extractVariables(usr)])),
+    recommendedModel: data.recommendedModel || '',
+    temperature: typeof data.temperature === 'number' ? data.temperature : 0.8,
+    maxTokens: typeof data.maxTokens === 'number' ? data.maxTokens : 2048,
+    tags: Array.isArray(data.tags) ? data.tags.slice(0, 20) : [],
+    referenceFiles: Array.isArray(data.referenceFiles)
+      ? data.referenceFiles
+          .filter((file: any) => file && typeof file.name === 'string' && typeof file.content === 'string')
+          .map((file: any) => ({ name: file.name, content: file.content }))
+      : [],
+    isBuiltIn: false,
+    createdAt: 0,
+    updatedAt: 0
+  }
+  tagInput.value = ''
+  editVisible.value = true
+  const referenceTip = editing.value.referenceFiles?.length
+    ? `，并识别到 ${editing.value.referenceFiles.length} 份参考资料`
+    : ''
+  ElMessage.success(`已从${sourceLabel}导入「${editing.value.name}」${referenceTip}，检查后点击保存`)
+}
+
+async function importFromFile() {
+  try {
+    const filePath = await window.api.file.selectSkillFile()
+    if (!filePath) return
+    const data = await window.api.file.readSkillFile(filePath)
+    applyImportedSkill(data, filePath.toLowerCase().endsWith('.zip') ? ' ZIP 技能包' : ' Markdown 文件')
+  } catch (e: any) {
+    ElMessage.error('导入失败：' + (e?.message || ''))
+  }
+}
+
 // ===== 从本地文件夹导入 skill =====
 // 支持的文件夹结构：
 //   1) skill/SKILL.md（YAML frontmatter + body）
@@ -381,32 +456,7 @@ async function importFromFolder() {
       return
     }
 
-    // 优先使用文件夹里的 systemPrompt；若 SKILL.md 的 frontmatter 没单独给出 systemPrompt，
-    // 也允许把 body 拆分：前半部分作为 systemPrompt，后半部分作为 userPrompt（保持简单，不做拆分）
-    const sys = (data.systemPrompt || '').trim()
-    const usr = (data.userPrompt || data.systemPrompt || '').trim()
-
-    editing.value = {
-      id: '',
-      projectId: project.value?.id || 'global',
-      name: data.name || '导入的技能',
-      description: data.description || '',
-      category: data.category || '导入',
-      icon: 'MagicStick',
-      systemPrompt: sys,
-      userPrompt: usr,
-      variables: extractVariables(usr),
-      recommendedModel: '',
-      temperature: typeof data.temperature === 'number' ? data.temperature : 0.8,
-      maxTokens: typeof data.maxTokens === 'number' ? data.maxTokens : 2048,
-      tags: Array.isArray(data.tags) ? data.tags.slice(0, 20) : [],
-      isBuiltIn: false,
-      createdAt: 0,
-      updatedAt: 0
-    }
-    tagInput.value = ''
-    editVisible.value = true
-    ElMessage.success(`已从文件夹导入：${editing.value.name}（请检查后保存）`)
+    applyImportedSkill(data, '文件夹')
   } catch (e: any) {
     ElMessage.error('导入失败：' + (e?.message || ''))
   }
@@ -428,6 +478,41 @@ function iconBg(s: Skill) {
 </script>
 
 <style scoped>
+.skill-guide {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 16px;
+}
+.guide-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: linear-gradient(145deg, var(--panel), var(--panel-2));
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.guide-step > b {
+  display: grid;
+  place-items: center;
+  flex: 0 0 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: white;
+  font-size: 12px;
+}
+.guide-step strong { color: var(--text); }
+.guide-step code, .field-help code {
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: var(--primary-light);
+  color: var(--primary);
+}
 .filter-bar {
   display: flex;
   align-items: center;
@@ -521,6 +606,17 @@ function iconBg(s: Skill) {
   flex-wrap: wrap;
   gap: 4px;
 }
+.reference-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  color: var(--primary);
+  font-size: 12px;
+}
 .var-tag { font-family: monospace; }
 .skill-footer {
   display: flex;
@@ -529,9 +625,35 @@ function iconBg(s: Skill) {
   flex-wrap: wrap;
 }
 .skill-form :deep(.el-form-item__label) { font-size: 13px; }
+.form-explain {
+  margin: -4px 0 16px 100px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--panel-2);
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.field-help {
+  width: 100%;
+  margin-top: 5px;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.reference-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
 .param-row {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+@media (max-width: 900px) {
+  .skill-guide { grid-template-columns: 1fr; }
+  .form-explain { margin-left: 0; }
 }
 </style>

@@ -84,6 +84,9 @@ const api = {
     readNovelText: (filePath: string) => ipcRenderer.invoke('file:read-novel', filePath),
     // 选择文件夹（用于 skill 导入等场景）
     selectFolder: () => ipcRenderer.invoke('file:select-folder'),
+    // 选择并读取单个 Markdown 或 ZIP 技能包
+    selectSkillFile: () => ipcRenderer.invoke('file:select-skill-file'),
+    readSkillFile: (filePath: string) => ipcRenderer.invoke('file:read-skill-file', filePath),
     // 读取 skill 文件夹，返回结构化数据
     readSkillFolder: (folderPath: string) => ipcRenderer.invoke('file:read-skill-folder', folderPath)
   },

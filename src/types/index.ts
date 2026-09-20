@@ -262,6 +262,11 @@ export interface Skill {
   temperature?: number
   maxTokens?: number
   tags: string[]
+  /** 随技能包导入的参考资料。调用技能时会作为只读资料真正发送给模型。 */
+  referenceFiles?: Array<{
+    name: string
+    content: string
+  }>
   isBuiltIn: boolean
   createdAt: number
   updatedAt: number

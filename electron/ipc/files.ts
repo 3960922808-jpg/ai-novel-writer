@@ -10,6 +10,7 @@ const MAX_DOCX_XML_BYTES = 20 * 1024 * 1024
 const MAX_SKILL_FILE_BYTES = 2 * 1024 * 1024
 const MAX_SKILL_TOTAL_BYTES = 10 * 1024 * 1024
 const MAX_SKILL_FILES = 64
+const MAX_SKILL_ZIP_BYTES = 20 * 1024 * 1024
 const approvedFiles = new Set<string>()
 const approvedFolders = new Set<string>()
 
@@ -137,6 +138,21 @@ export function registerFileIPC() {
     }
   })
 
+  ipcMain.handle('file:select-skill-file', async () => {
+    try {
+      const r = await dialog.showOpenDialog({
+        title: '导入技能文件',
+        properties: ['openFile'],
+        filters: [{ name: '技能文件', extensions: ['md', 'markdown', 'zip'] }]
+      })
+      if (r.canceled || r.filePaths.length === 0) return null
+      await approveFile(r.filePaths[0])
+      return r.filePaths[0]
+    } catch (e: any) {
+      throw new Error('选择技能文件失败：' + e.message)
+    }
+  })
+
   // 读取小说文件文本内容
   ipcMain.handle('file:read-novel', async (_e, inputPath: string) => {
     try {
@@ -167,6 +183,45 @@ export function registerFileIPC() {
       throw new Error('暂不支持的文件格式：' + ext)
     } catch (e: any) {
       throw new Error('读取文件失败：' + e.message)
+    }
+  })
+
+  ipcMain.handle('file:read-skill-file', async (_e, inputPath: string) => {
+    try {
+      const filePath = await requireApprovedFile(inputPath)
+      await assertFileSize(filePath, MAX_SKILL_ZIP_BYTES, '技能文件')
+      const ext = path.extname(filePath).toLowerCase()
+      const defaultName = path.basename(filePath, ext)
+      const files: SkillSourceFile[] = []
+
+      if (ext === '.md' || ext === '.markdown') {
+        const buf = await fs.readFile(filePath)
+        files.push({ name: path.basename(filePath), content: await decodeText(buf) })
+      } else if (ext === '.zip') {
+        const zip = await JSZip.loadAsync(await fs.readFile(filePath), { checkCRC32: true })
+        let totalBytes = 0
+        const entries = Object.values(zip.files)
+          .filter(entry => !entry.dir)
+          .filter(entry => ['.md', '.markdown', '.txt', '.json', '.yaml', '.yml'].includes(path.extname(entry.name).toLowerCase()))
+          .slice(0, MAX_SKILL_FILES)
+        for (const entry of entries) {
+          const safeName = entry.name.replace(/\\/g, '/')
+          if (safeName.startsWith('/') || safeName.split('/').includes('..')) continue
+          const declaredSize = Number((entry as any)._data?.uncompressedSize || 0)
+          if (declaredSize > MAX_SKILL_FILE_BYTES) continue
+          const buf = await entry.async('nodebuffer')
+          totalBytes += buf.length
+          if (totalBytes > MAX_SKILL_TOTAL_BYTES) throw new Error('技能包解压后的文本总量超过 10 MB')
+          files.push({ name: safeName, content: await decodeText(buf) })
+        }
+      } else {
+        throw new Error('仅支持 Markdown 或 ZIP 技能包')
+      }
+
+      if (files.length === 0) throw new Error('技能文件中没有可读取的 Markdown 或文本资料')
+      return parseSkillBundle(files, defaultName)
+    } catch (e: any) {
+      throw new Error('读取技能文件失败：' + e.message)
     }
   })
 
@@ -211,101 +266,119 @@ export function registerFileIPC() {
         }
       }
 
-      // 文件夹名作为默认 skill 名
-      const folderName = path.basename(folderPath)
-
-      // 解析逻辑
-      let name = folderName
-      let description = ''
-      let systemPrompt = ''
-      let userPrompt = ''
-      let category = '导入'
-      let temperature: number | undefined
-      let maxTokens: number | undefined
-      let tags: string[] = []
-
-      // 1. 尝试读 config.json
-      const configFile = files.find(f => /^config\.json$/i.test(f.name))
-      if (configFile) {
-        try {
-          const cfg = JSON.parse(configFile.content)
-          if (cfg.name) name = String(cfg.name)
-          if (cfg.description) description = String(cfg.description)
-          if (cfg.category) category = String(cfg.category)
-          if (cfg.systemPrompt) systemPrompt = String(cfg.systemPrompt)
-          if (cfg.userPrompt) userPrompt = String(cfg.userPrompt)
-          if (typeof cfg.temperature === 'number') temperature = cfg.temperature
-          if (typeof cfg.maxTokens === 'number') maxTokens = cfg.maxTokens
-          if (Array.isArray(cfg.tags)) tags = cfg.tags.map(String)
-        } catch {
-          // 配置文件解析失败，继续用其他方式
-        }
-      }
-
-      // 2. 解析 SKILL.md / skill.md（yaml frontmatter + body）
-      const skillMd = files.find(f => /^skill\.(md|markdown)$/i.test(f.name))
-      if (skillMd) {
-        const parsed = parseMarkdownWithFrontmatter(skillMd.content)
-        if (parsed.frontmatter.name) name = parsed.frontmatter.name
-        if (parsed.frontmatter.description) description = parsed.frontmatter.description
-        if (parsed.frontmatter.category) category = parsed.frontmatter.category
-        if (parsed.frontmatter.tags) {
-          tags = Array.isArray(parsed.frontmatter.tags)
-            ? parsed.frontmatter.tags.map(String)
-            : String(parsed.frontmatter.tags).split(/[,，]/).map(s => s.trim()).filter(Boolean)
-        }
-        if (parsed.frontmatter.temperature) temperature = Number(parsed.frontmatter.temperature)
-        if (parsed.frontmatter.maxTokens) maxTokens = Number(parsed.frontmatter.maxTokens)
-        if (parsed.frontmatter.systemPrompt) systemPrompt = parsed.frontmatter.systemPrompt
-        // body 作为 userPrompt（若未单独指定）
-        if (!userPrompt && parsed.body) userPrompt = parsed.body
-      }
-
-      // 3. system.md / system.txt 作为 systemPrompt
-      if (!systemPrompt) {
-        const sysFile = files.find(f => /^system\.(md|markdown|txt)$/i.test(f.name))
-        if (sysFile) systemPrompt = sysFile.content.trim()
-      }
-
-      // 4. prompt.md / user.md / user.txt 作为 userPrompt
-      if (!userPrompt) {
-        const promptFile =
-          files.find(f => /^prompt\.(md|markdown|txt)$/i.test(f.name)) ||
-          files.find(f => /^user\.(md|markdown|txt)$/i.test(f.name))
-        if (promptFile) {
-          const parsed = parseMarkdownWithFrontmatter(promptFile.content)
-          if (parsed.frontmatter.name && !configFile) name = parsed.frontmatter.name
-          if (parsed.frontmatter.description && !description) description = parsed.frontmatter.description
-          if (parsed.frontmatter.systemPrompt && !systemPrompt) systemPrompt = parsed.frontmatter.systemPrompt
-          userPrompt = parsed.body || promptFile.content
-        }
-      }
-
-      // 5. 兜底：任意一个 .md 文件作为 userPrompt
-      if (!userPrompt) {
-        const anyMd = files.find(f => /\.(md|markdown)$/i.test(f.name))
-        if (anyMd) {
-          const parsed = parseMarkdownWithFrontmatter(anyMd.content)
-          userPrompt = parsed.body || anyMd.content
-        }
-      }
-
-      return {
-        name,
-        description,
-        systemPrompt,
-        userPrompt,
-        category,
-        temperature,
-        maxTokens,
-        tags,
-        files: files.map(f => ({ name: f.name, content: f.content })),
-        folderPath
-      }
+      return { ...parseSkillBundle(files, path.basename(folderPath)), folderPath }
     } catch (e: any) {
       throw new Error('读取 skill 文件夹失败：' + e.message)
     }
   })
+}
+
+interface SkillSourceFile {
+  name: string
+  content: string
+  path?: string
+}
+
+async function decodeText(buf: Buffer): Promise<string> {
+  let content = buf.toString('utf-8')
+  if (content.includes('\uFFFD')) {
+    const iconv = await import('iconv-lite').catch(() => null)
+    if (iconv) content = iconv.decode(buf, 'gbk')
+  }
+  return content
+}
+
+function baseName(fileName: string): string {
+  return fileName.replace(/\\/g, '/').split('/').pop() || fileName
+}
+
+function parseSkillBundle(files: SkillSourceFile[], defaultName: string) {
+  let name = defaultName
+  let description = ''
+  let systemPrompt = ''
+  let userPrompt = ''
+  let category = '导入'
+  let temperature: number | undefined
+  let maxTokens: number | undefined
+  let recommendedModel = ''
+  let tags: string[] = []
+
+  const configFile = files.find(f => /^config\.json$/i.test(baseName(f.name)))
+  if (configFile) {
+    try {
+      const cfg = JSON.parse(configFile.content)
+      if (cfg.name) name = String(cfg.name)
+      if (cfg.description) description = String(cfg.description)
+      if (cfg.category) category = String(cfg.category)
+      if (cfg.systemPrompt) systemPrompt = String(cfg.systemPrompt)
+      if (cfg.userPrompt) userPrompt = String(cfg.userPrompt)
+      if (typeof cfg.temperature === 'number') temperature = cfg.temperature
+      if (typeof cfg.maxTokens === 'number') maxTokens = cfg.maxTokens
+      if (cfg.recommendedModel) recommendedModel = String(cfg.recommendedModel)
+      if (Array.isArray(cfg.tags)) tags = cfg.tags.map(String)
+    } catch {
+      // 配置损坏时继续尝试 Markdown。
+    }
+  }
+
+  const skillMd = files.find(f => /^skill\.(md|markdown)$/i.test(baseName(f.name)))
+    || (files.length === 1 && /\.(md|markdown)$/i.test(files[0].name) ? files[0] : undefined)
+  if (skillMd) {
+    const parsed = parseMarkdownWithFrontmatter(skillMd.content)
+    if (parsed.frontmatter.name) name = String(parsed.frontmatter.name)
+    if (parsed.frontmatter.description) description = String(parsed.frontmatter.description)
+    if (parsed.frontmatter.category) category = String(parsed.frontmatter.category)
+    if (parsed.frontmatter.tags) {
+      tags = Array.isArray(parsed.frontmatter.tags)
+        ? parsed.frontmatter.tags.map(String)
+        : String(parsed.frontmatter.tags).split(/[,，]/).map(s => s.trim()).filter(Boolean)
+    }
+    if (parsed.frontmatter.temperature !== undefined) temperature = Number(parsed.frontmatter.temperature)
+    if (parsed.frontmatter.maxTokens !== undefined) maxTokens = Number(parsed.frontmatter.maxTokens)
+    if (parsed.frontmatter.recommendedModel) recommendedModel = String(parsed.frontmatter.recommendedModel)
+    if (parsed.frontmatter.systemPrompt) systemPrompt = String(parsed.frontmatter.systemPrompt)
+    if (parsed.frontmatter.userPrompt) userPrompt = String(parsed.frontmatter.userPrompt)
+    if (!userPrompt && parsed.body) userPrompt = parsed.body
+  }
+
+  if (!systemPrompt) {
+    const sysFile = files.find(f => /^system\.(md|markdown|txt)$/i.test(baseName(f.name)))
+    if (sysFile) systemPrompt = sysFile.content.trim()
+  }
+  if (!userPrompt) {
+    const promptFile = files.find(f => /^prompt\.(md|markdown|txt)$/i.test(baseName(f.name)))
+      || files.find(f => /^user\.(md|markdown|txt)$/i.test(baseName(f.name)))
+    if (promptFile) {
+      const parsed = parseMarkdownWithFrontmatter(promptFile.content)
+      if (parsed.frontmatter.name && !configFile) name = String(parsed.frontmatter.name)
+      if (parsed.frontmatter.description && !description) description = String(parsed.frontmatter.description)
+      if (parsed.frontmatter.systemPrompt && !systemPrompt) systemPrompt = String(parsed.frontmatter.systemPrompt)
+      userPrompt = parsed.body || promptFile.content
+    }
+  }
+  if (!userPrompt) {
+    const anyMd = files.find(f => /\.(md|markdown)$/i.test(f.name))
+    if (anyMd) userPrompt = parseMarkdownWithFrontmatter(anyMd.content).body || anyMd.content
+  }
+
+  const instructionFiles = new Set([configFile?.name, skillMd?.name].filter(Boolean))
+  const referenceFiles = files
+    .filter(file => !instructionFiles.has(file.name))
+    .filter(file => !/^(system|prompt|user)\.(md|markdown|txt)$/i.test(baseName(file.name)))
+    .map(file => ({ name: file.name, content: file.content.slice(0, MAX_SKILL_FILE_BYTES) }))
+
+  return {
+    name,
+    description,
+    systemPrompt,
+    userPrompt,
+    category,
+    temperature: Number.isFinite(temperature) ? temperature : undefined,
+    maxTokens: Number.isFinite(maxTokens) ? maxTokens : undefined,
+    recommendedModel,
+    tags: tags.slice(0, 20),
+    referenceFiles
+  }
 }
 
 /** 解析 markdown frontmatter（YAML 头），返回 { frontmatter, body } */

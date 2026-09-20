@@ -331,7 +331,10 @@
           <div class="link-row">
             <el-button text size="small" :icon="Link" @click="linkCurrentChapter">@关联内容</el-button>
             <el-button text size="small" :icon="Upload" @click="uploadAttachment">添加文件</el-button>
-            <span class="text-faint text-xs">总计:{{ linkedWordsCount }}字 ({{ linkedItems.length }}个片段)</span>
+            <button v-if="linkedItems.length || pendingSkill?.referenceFiles?.length" class="reference-preview-btn" @click="contextPreviewVisible = true">
+              已准备 {{ linkedItems.length }} 项关联内容 · {{ linkedWordsCount }} 字<span v-if="pendingSkill?.referenceFiles?.length"> + {{ pendingSkill.referenceFiles.length }} 份技能资料</span> · 查看
+            </button>
+            <span v-else class="text-faint text-xs">尚未关联资料</span>
           </div>
           <div class="linked-tags" v-if="linkedItems.length">
             <el-tag
@@ -365,22 +368,24 @@
               v-model="userInput"
               class="chat-input"
               placeholder="请输入指令，输入 @ 关联地点/设定/章节，输入 / 触发技能"
-              rows="4"
+              rows="3"
               @input="onInput"
               @keydown="onKeydown"
             ></textarea>
-            <!-- 显眼的“发送需求”按钮（textarea 右下角浮动） -->
-            <button
-              class="send-demand-btn"
-              :class="{ disabled: !canSend || generating }"
-              :disabled="!canSend || generating"
-              @click="sendChat"
-              :title="generating ? 'AI 正在生成…' : '点击发送需求（Enter）'"
-            >
-              <el-icon v-if="generating" class="loading-icon"><Loading /></el-icon>
-              <el-icon v-else><Promotion /></el-icon>
-              <span>{{ generating ? '生成中' : '发送需求' }}</span>
-            </button>
+            <div class="composer-actions">
+              <span class="composer-hint">Enter 发送 · Shift+Enter 换行</span>
+              <button
+                class="send-demand-btn"
+                :class="{ disabled: !canSend || generating }"
+                :disabled="!canSend || generating"
+                @click="sendChat"
+                :title="generating ? 'AI 正在生成…' : '点击发送需求（Enter）'"
+              >
+                <el-icon v-if="generating" class="loading-icon"><Loading /></el-icon>
+                <el-icon v-else><Promotion /></el-icon>
+                <span>{{ generating ? '生成中' : '发送需求' }}</span>
+              </button>
+            </div>
           </div>
 
           <!-- 技能弹出菜单 -->
@@ -455,9 +460,9 @@
             </button>
             <el-select
               v-model="selectedPromptId"
+              class="bottom-select"
               placeholder="选择提示词 ▽"
               size="small"
-              style="width: 140px"
               filterable
               clearable
               placement="top"
@@ -472,9 +477,9 @@
             </el-select>
             <el-select
               v-model="aiModel"
+              class="bottom-select"
               placeholder="进阶模型"
               size="small"
-              style="width: 140px"
               placement="top"
               popper-class="editor-input-popper"
             >
@@ -570,6 +575,27 @@
         <el-button type="primary" @click="confirmAtPicker">确定</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="contextPreviewVisible" title="本次会真正发送给 AI 的引用资料" width="620px" append-to-body>
+      <div class="reference-preview-note">
+        下列内容会拼入本次模型请求，并随对话记录保存；重启软件后仍可恢复，不是只显示标签。
+      </div>
+      <div v-if="pendingSkill?.referenceFiles?.length" class="reference-preview-group">
+        <h4>技能「{{ pendingSkill.name }}」自带资料</h4>
+        <div v-for="file in pendingSkill.referenceFiles" :key="file.name" class="reference-preview-item">
+          <strong>{{ file.name }}</strong><span>{{ file.content.length }} 字</span>
+          <p>{{ file.content.slice(0, 260) }}<template v-if="file.content.length > 260">……</template></p>
+        </div>
+      </div>
+      <div v-if="linkedItems.length" class="reference-preview-group">
+        <h4>你通过 @ 或“添加文件”选择的资料</h4>
+        <div v-for="item in linkedItems" :key="(item.type || '') + item.label" class="reference-preview-item">
+          <strong>{{ item.type || '资料' }} · {{ item.label }}</strong><span>{{ item.content.length }} 字</span>
+          <p>{{ item.content.slice(0, 260) }}<template v-if="item.content.length > 260">……</template></p>
+        </div>
+      </div>
+      <el-empty v-if="!linkedItems.length && !pendingSkill?.referenceFiles?.length" description="本次还没有关联资料" />
+    </el-dialog>
   </div>
 </template>
 
@@ -596,6 +622,7 @@ import { useSettingsStore } from '@/stores/settings'
 import * as db from '@/services/db'
 import * as aiSvc from '@/services/ai'
 import { buildConversationForAI, buildConversationWithCompression, editorSessionChapterId } from '@/services/conversation'
+import { appendSkillSupplement, buildLinkedReferenceBlock, buildSkillReferenceBlock } from '@/services/skill-runtime'
 import { Skills as SkillsDB } from '@/services/db'
 import { useWebSearch } from '@/composables/useWebSearch'
 import type { Chapter, Prompt, Skill, CanvasNode, TimelineEvent, TruthFile } from '@/types'
@@ -1135,6 +1162,7 @@ interface LinkedContextItem {
 }
 const linkedItems = ref<LinkedContextItem[]>([])
 const linkedWordsCount = computed(() => linkedItems.value.reduce((s, i) => s + i.content.length, 0))
+const contextPreviewVisible = ref(false)
 
 function linkCurrentChapter() {
   if (!chapter.value) return
@@ -1582,9 +1610,8 @@ async function sendChat() {
     ? editor.value!.state.doc.textBetween(selRange.from, selRange.to, '\n')
     : ''
   // @ 关联内容：所有分支都应注入到 userContent，确保 AI 能看到
-  const linkedContent = linkedItems.value.length
-    ? linkedItems.value.map(i => `【${i.label}】\n${i.content}`).join('\n\n')
-    : ''
+  const linkedContent = buildLinkedReferenceBlock(linkedItems.value)
+  const skillReferenceContent = buildSkillReferenceBlock(activeSkill)
   // 用户要求：@ 关联存在时，不发送章节正文，只发 @ 关联文件内容
   const hasLinked = !!linkedContent
   let searchCtx = ''
@@ -1627,15 +1654,15 @@ async function sendChat() {
     }
     sysContent = activeSkill.systemPrompt ? aiSvc.renderTemplate(activeSkill.systemPrompt, vars) : sysContent
     userContent = aiSvc.renderTemplate(activeSkill.userPrompt, vars)
-    // 如果用户有补充输入且模板中没占位符接收，追加到末尾
-    if (userMsg && !activeSkill.userPrompt.includes('{{')) {
-      userContent = userMsg
-    } else if (userMsg && activeSkill.variables && !activeSkill.variables.some(v => ['instruction', 'scene', 'emotion', 'topic'].includes(v))) {
-      userContent += `\n\n【用户补充说明】${userMsg}`
-    }
-    // 注入 @ 关联内容（技能分支此前丢失，这里补齐）
+    // 模板没有接收补充要求的变量时，只追加用户说明，绝不能用它覆盖技能模板。
+    // 否则不含 {{变量}} 的技能会看似被选中、实际却完全没有发给模型。
+    userContent = appendSkillSupplement(userContent, userMsg, requiredVariables)
+    // 注入用户选择的关联内容与技能包参考资料；两者都会进入真实模型请求。
     if (linkedContent) {
-      userContent += `\n\n【@ 关联内容】\n${linkedContent}`
+      userContent += `\n\n${linkedContent}`
+    }
+    if (skillReferenceContent) {
+      userContent += `\n\n${skillReferenceContent}`
     }
   } else if (activePromptId) {
     const all = [...builtinPrompts.value, ...projectPrompts.value]
@@ -1649,14 +1676,14 @@ async function sendChat() {
     }
     // 注入 @ 关联内容（提示词分支此前丢失，这里补齐）
     if (linkedContent) {
-      userContent += `\n\n【@ 关联内容】\n${linkedContent}`
+      userContent += `\n\n${linkedContent}`
     }
   } else {
     // 普通对话：
     // - 有 @ 关联时只发关联文件内容，不发正文上下文
     // - 无 @ 关联时发用户消息 + 当前上下文（含正文摘要）
     if (hasLinked) {
-      userContent = `${userMsg ? `【用户要求】\n${userMsg}\n\n` : ''}【@ 关联内容】\n${linkedContent}`
+      userContent = `${userMsg ? `【用户要求】\n${userMsg}\n\n` : ''}${linkedContent}`
     } else {
       userContent = `${userMsg}\n\n【当前上下文】\n${ctx}`
     }
@@ -2975,6 +3002,17 @@ html.has-wallpaper .ai-output-card {
   flex-wrap: wrap;
   margin-top: 6px;
 }
+.reference-preview-btn {
+  margin-left: auto;
+  padding: 4px 9px;
+  border: 1px solid color-mix(in srgb, var(--primary) 32%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 8%, var(--panel));
+  color: var(--primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.reference-preview-btn:hover { background: color-mix(in srgb, var(--primary) 14%, var(--panel)); }
 
 .input-area {
   border-top: 1px solid #f1f2f5;
@@ -2989,16 +3027,23 @@ html.has-wallpaper .ai-output-card {
   flex-wrap: wrap;
 }
 .chat-input-wrap {
-  position: relative;
   width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 18px;
+  background: var(--panel, #fff);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.chat-input-wrap:focus-within {
+  border-color: var(--primary, #2563eb);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 15%, transparent);
 }
 .chat-input {
   width: 100%;
-  border: 1px solid var(--border, #e2e8f0);
-  border-radius: 6px;
-  padding: 10px 12px;
-  /* 右下方给浮动按钮让出空间，避免文字被按钮遮挡 */
-  padding-bottom: 48px;
+  min-height: 92px;
+  border: 0;
+  border-radius: 0;
+  padding: 13px 14px 8px;
   font-size: 14px;
   line-height: 1.65;
   resize: none;
@@ -3007,7 +3052,6 @@ html.has-wallpaper .ai-output-card {
   background: var(--panel, #ffffff);
   color: var(--text, #1a202c);
   box-sizing: border-box;
-  transition: border-color 0.15s, box-shadow 0.15s;
 }
 html.dark .chat-input {
   background: #1e293b;
@@ -3015,21 +3059,31 @@ html.dark .chat-input {
   border-color: #334155;
 }
 .chat-input:focus {
-  border-color: var(--primary, #2563eb);
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+  box-shadow: none;
 }
 
-/* 显眼的“发送需求”按钮（textarea 右下角浮动） */
+.composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 8px 8px 13px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+}
+.composer-hint {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .send-demand-btn {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
   display: inline-flex;
   align-items: center;
   gap: 5px;
   padding: 6px 14px;
   border: none;
-  border-radius: 6px;
+  border-radius: 999px;
   background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
   color: #ffffff;
   font-size: 13px;
@@ -3038,7 +3092,7 @@ html.dark .chat-input {
   user-select: none;
   box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);
   transition: transform 0.12s, box-shadow 0.12s, background 0.12s, opacity 0.12s;
-  z-index: 2;
+  flex: 0 0 auto;
 }
 .send-demand-btn:hover:not(.disabled) {
   transform: translateY(-1px);
@@ -3122,12 +3176,17 @@ html.dark .send-demand-btn:disabled {
   justify-content: space-between;
   padding: 6px 12px 10px;
   gap: 8px;
+  flex-wrap: wrap;
 }
 .input-bottom-left {
   display: flex;
   gap: 6px;
   align-items: center;
+  flex: 1 1 260px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
+.bottom-select { width: 132px; max-width: 100%; }
 .web-search-btn {
   display: inline-flex;
   align-items: center;
@@ -3135,7 +3194,7 @@ html.dark .send-demand-btn:disabled {
   padding: 4px 10px;
   font-size: 12px;
   border: 1px solid var(--border, #dcdfe6);
-  border-radius: 4px;
+  border-radius: 999px;
   background: var(--panel, #fff);
   color: var(--text-2, #606266);
   cursor: pointer;
@@ -3169,6 +3228,33 @@ html.dark .send-demand-btn:disabled {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.reference-preview-note {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--primary-light);
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.reference-preview-group { margin-top: 16px; }
+.reference-preview-group h4 { margin: 0 0 8px; color: var(--text); }
+.reference-preview-item {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+.reference-preview-item strong { margin-right: 8px; color: var(--text); font-size: 13px; }
+.reference-preview-item span { color: var(--text-3); font-size: 11px; }
+.reference-preview-item p {
+  margin: 6px 0 0;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .screenshot-hint { color: #cbd5e0; }
 
