@@ -170,6 +170,14 @@ export interface AppSettings {
   /** @deprecated v1.4.0：默认 baseUrl 由 apiKeys 中第一个 provider 决定 */
   defaultBaseUrl?: string
   apiKeys: { provider: string; baseUrl: string; apiKey: string; models: string[] }[]
+  /** 独立的公益模型入口；密钥由主进程使用系统安全存储加密。 */
+  communityModel?: {
+    enabled: boolean
+    baseUrl: string
+    apiKey: string
+    model: string
+    models: string[]
+  }
   theme: 'light' | 'dark'
   fontSize: number
   editorFont: string

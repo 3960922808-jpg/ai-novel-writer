@@ -184,6 +184,43 @@
         </div>
       </div>
 
+      <div class="card section-card community-section">
+        <div class="section-title-row">
+          <div>
+            <div class="section-title">公益模型</div>
+            <div class="text-faint text-xs">启用后会出现在写作、设定对话和技能的模型选择器中</div>
+          </div>
+          <el-switch v-model="communityModel.enabled" size="large" inline-prompt active-text="已启用" inactive-text="未启用" />
+        </div>
+        <div class="community-hero" :class="{ active: communityModel.enabled }">
+          <div class="community-logo">N</div>
+          <div class="community-main">
+            <div class="community-name">
+              NVIDIA NIM
+              <el-tag round size="small" :type="communityReady ? 'success' : 'info'">{{ communityReady ? '可以直接调用' : '等待配置' }}</el-tag>
+            </div>
+            <div class="text-faint text-xs">英伟达官方开发者免费端点 · OpenAI 兼容接口</div>
+          </div>
+          <el-button round :loading="testingCommunity" @click="refreshCommunityModels">检测并获取模型</el-button>
+        </div>
+        <div v-if="communityTestMessage" class="test-result" :class="communityTestOk ? 'ok' : 'fail'">
+          <el-icon><CircleCheck v-if="communityTestOk" /><CircleClose v-else /></el-icon>
+          <span class="test-result-msg">{{ communityTestMessage }}</span>
+        </div>
+        <el-form-item label="选择公益模型">
+          <el-select v-model="communityModel.model" filterable style="width: 100%" placeholder="先检测可用模型">
+            <el-option v-for="model in communityModel.models" :key="model" :label="model" :value="model" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="本机服务密钥">
+          <el-input v-model="communityModel.apiKey" type="password" show-password placeholder="nvapi-..." autocomplete="off" />
+          <div class="community-security-tip">
+            仅在当前电脑使用 Windows 安全存储加密保存，不会写入源码或公开安装包。
+            <el-link type="primary" :underline="false" @click="openExternal('https://build.nvidia.com/explore')">申请或管理密钥</el-link>
+          </div>
+        </el-form-item>
+      </div>
+
       <div class="card section-card">
         <div class="section-title-row">
           <div class="section-title">API 配置</div>
@@ -194,12 +231,6 @@
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item command="nvidia">
-                    <div class="quick-item">
-                      <div class="quick-name">英伟达开发者免费端点</div>
-                      <div class="quick-desc text-faint text-xs">NVIDIA NIM · 自动获取当前可用模型</div>
-                    </div>
-                  </el-dropdown-item>
                   <el-dropdown-item command="openai">
                     <div class="quick-item">
                       <div class="quick-name">OpenAI</div>
@@ -250,15 +281,6 @@
         <div class="text-faint text-xs" style="margin-bottom: 12px">
           模型只能通过下方 API 配置管理。<span style="color: var(--text-2)">支持同时保留多个 Provider 与模型配置，互不影响</span> —— 第一个「已就绪」（填了 API Key 且有模型）的将作为默认使用。
           支持任意 OpenAI 兼容接口，可直接填入<span style="color: var(--text-2)">中转站</span>地址与对应 Key。
-        </div>
-
-        <div class="public-model-notice">
-          <div class="public-model-copy">
-            <strong>公益模型体验</strong>
-            <span>使用英伟达官方开发者免费端点。需要自行申请免费的 NVIDIA API Key；免费额度、速率和模型会随官方政策变化，不内置共享密钥。</span>
-          </div>
-          <el-button round type="primary" plain @click="quickAddProvider('nvidia')">添加英伟达免费端点</el-button>
-          <el-button round @click="openExternal('https://build.nvidia.com/explore')">申请免费 Key</el-button>
         </div>
 
         <!-- 可用模型总览：直观展示多个模型共存 -->
@@ -556,6 +578,13 @@ const form = reactive<AppSettings>({
   defaultModel: '',
   defaultBaseUrl: '',
   apiKeys: [],
+  communityModel: {
+    enabled: false,
+    baseUrl: 'https://integrate.api.nvidia.com/v1',
+    apiKey: '',
+    model: 'mistralai/mistral-nemotron',
+    models: ['mistralai/mistral-nemotron']
+  },
   theme: 'light',
   themeMode: 'light',
   fontSize: 14,
@@ -589,6 +618,14 @@ const form = reactive<AppSettings>({
       googleModel: 'imagen-4.0-generate-001'
     }
   })
+
+const communityModel = computed(() => form.communityModel!)
+const testingCommunity = ref(false)
+const communityTestOk = ref(false)
+const communityTestMessage = ref('')
+const communityReady = computed(() => Boolean(
+  communityModel.value.enabled && communityModel.value.apiKey.trim() && communityModel.value.model
+))
 
 // 当前版本号 — 从 package.json 注入到 vite define 或回退到 1.0.0
 const currentVersion = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_APP_VERSION) || '1.0.0'
@@ -723,15 +760,6 @@ interface ProviderPreset {
 
 const PROVIDER_PRESETS: ProviderPreset[] = [
   {
-    key: 'nvidia',
-    label: '英伟达开发者免费端点',
-    provider: 'NVIDIA 免费端点',
-    baseUrl: 'https://integrate.api.nvidia.com/v1',
-    // 仅保留一个已由英伟达官方示例公开的兜底模型；连接测试会从 /models 自动补全当前列表。
-    models: ['mistralai/mistral-nemotron'],
-    website: 'https://build.nvidia.com/explore'
-  },
-  {
     key: 'openai',
     label: 'OpenAI',
     provider: 'OpenAI',
@@ -840,6 +868,40 @@ function removeProvider(idx: number) {
   form.apiKeys.splice(idx, 1)
 }
 
+async function refreshCommunityModels() {
+  if (!communityModel.value.apiKey.trim()) {
+    ElMessage.warning('请先填写 NVIDIA 服务密钥')
+    return
+  }
+  testingCommunity.value = true
+  communityTestMessage.value = ''
+  const started = performance.now()
+  try {
+    const data = await window.api.ai.listModels({
+      baseUrl: communityModel.value.baseUrl,
+      apiKey: communityModel.value.apiKey
+    })
+    const models: string[] = Array.isArray(data?.models) ? data.models : []
+    if (!models.length) throw new Error('接口可连接，但没有返回可用模型')
+    communityModel.value.models = [...new Set(models)].sort()
+    if (!communityModel.value.models.includes(communityModel.value.model)) {
+      const nemotron = communityModel.value.models.find(id => /nemotron/i.test(id))
+      communityModel.value.model = nemotron || communityModel.value.models[0]
+    }
+    communityModel.value.enabled = true
+    const latency = Math.round(performance.now() - started)
+    communityTestOk.value = true
+    communityTestMessage.value = `连接成功 · 已获取 ${models.length} 个可用模型 · ${latency} ms`
+    await settingsStore.update({ communityModel: JSON.parse(JSON.stringify(communityModel.value)) })
+    ElMessage.success('公益模型已启用，现在可以在各个模型选择器中直接使用')
+  } catch (e: any) {
+    communityTestOk.value = false
+    communityTestMessage.value = '连接失败：' + (e?.message || '请检查密钥和网络')
+  } finally {
+    testingCommunity.value = false
+  }
+}
+
 // 测试 Provider 连通性（含延迟测量，单位 ms）
 async function testConnection(idx: number) {
   const p = form.apiKeys[idx]
@@ -898,6 +960,15 @@ function fillForm(s: AppSettings) {
   autoSaveReady.value = false
   Object.assign(form, JSON.parse(JSON.stringify(s)))
   if (!Array.isArray(form.apiKeys)) form.apiKeys = []
+  if (!form.communityModel) {
+    form.communityModel = {
+      enabled: false,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
+      apiKey: '',
+      model: 'mistralai/mistral-nemotron',
+      models: ['mistralai/mistral-nemotron']
+    }
+  }
   // 老数据兼容
   if (!form.searchProvider) form.searchProvider = 'duckduckgo'
   if (!form.searchApiKey) form.searchApiKey = ''
@@ -962,6 +1033,7 @@ function persistAppearance(patch: Partial<AppSettings>, immediate = false) {
   const commit = () => settingsStore.update(patch).catch((error: any) => {
     ElMessage.error('外观保存失败：' + (error?.message || '未知错误'))
   })
+
   if (immediate) commit()
   else appearanceSaveTimer = setTimeout(commit, 180)
 }
@@ -1178,6 +1250,7 @@ async function save() {
   try {
     await settingsStore.update({
       apiKeys: JSON.parse(JSON.stringify(form.apiKeys)),
+      communityModel: JSON.parse(JSON.stringify(communityModel.value)),
       theme: form.theme,
       themeMode: form.themeMode,
       fontSize: form.fontSize,
@@ -1221,7 +1294,8 @@ let pendingAutoSave: Promise<any> | null = null
 async function autoSaveApiKeys() {
   try {
     pendingAutoSave = settingsStore.update({
-      apiKeys: JSON.parse(JSON.stringify(form.apiKeys))
+      apiKeys: JSON.parse(JSON.stringify(form.apiKeys)),
+      communityModel: JSON.parse(JSON.stringify(form.communityModel))
     })
     await pendingAutoSave
   } catch (e: any) {
@@ -1236,6 +1310,16 @@ watch(
   () => form.apiKeys,
   () => {
     if (!autoSaveReady.value) return
+    if (autoSaveTimer) clearTimeout(autoSaveTimer)
+    autoSaveTimer = setTimeout(autoSaveApiKeys, 800)
+  },
+  { deep: true }
+)
+
+watch(
+  () => form.communityModel,
+  () => {
+    if (!autoSaveReady.value || !form.communityModel) return
     if (autoSaveTimer) clearTimeout(autoSaveTimer)
     autoSaveTimer = setTimeout(autoSaveApiKeys, 800)
   },
@@ -1452,6 +1536,46 @@ html.dark .preview-body { background: rgba(30,41,59,var(--preview-panel-opacity)
   border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
   border-radius: 18px;
   background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 9%, var(--panel)), var(--panel));
+}
+.community-section {
+  overflow: hidden;
+  border-color: color-mix(in srgb, #76b900 30%, var(--border));
+}
+.community-section .section-title-row { align-items: center; }
+.community-section .section-title { padding: 0; margin-bottom: 4px; border: 0; }
+.community-hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--panel-2);
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+.community-hero.active {
+  border-color: rgba(118, 185, 0, .48);
+  box-shadow: 0 8px 28px rgba(118, 185, 0, .08);
+}
+.community-logo {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  place-items: center;
+  color: #fff;
+  font-size: 21px;
+  font-weight: 800;
+  border-radius: 14px;
+  background: #76b900;
+}
+.community-main { flex: 1; min-width: 0; }
+.community-name { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; color: var(--text); font-size: 15px; font-weight: 700; }
+.community-security-tip { margin-top: 6px; color: var(--text-3); font-size: 12px; line-height: 1.55; }
+@media (max-width: 760px) {
+  .community-hero { align-items: stretch; flex-direction: column; }
+  .community-logo { display: none; }
 }
 .public-model-copy {
   display: flex;

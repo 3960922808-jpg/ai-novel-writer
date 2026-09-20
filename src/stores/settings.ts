@@ -176,8 +176,13 @@ export const useSettingsStore = defineStore('settings', () => {
 
   /** 所有可用模型（已配置 Key 的） */
   function availableModels(): { provider: string; model: string }[] {
-    if (!settings.value || !Array.isArray(settings.value.apiKeys)) return []
+    if (!settings.value) return []
     const r: { provider: string; model: string }[] = []
+    const community = settings.value.communityModel
+    if (community?.enabled && community.apiKey && community.model) {
+      r.push({ provider: '公益模型', model: community.model })
+    }
+    if (!Array.isArray(settings.value.apiKeys)) return r
     for (const p of settings.value.apiKeys) {
       if (p && p.apiKey) {
         for (const m of p.models) r.push({ provider: p.provider, model: m })
@@ -194,7 +199,12 @@ export const useSettingsStore = defineStore('settings', () => {
 
   /** 默认 provider：取第一个配置了 apiKey 的 provider */
   function defaultProvider(): { provider: string; baseUrl: string; apiKey: string } | null {
-    if (!settings.value || !Array.isArray(settings.value.apiKeys)) return null
+    if (!settings.value) return null
+    const community = settings.value.communityModel
+    if (community?.enabled && community.apiKey && community.model) {
+      return { provider: '公益模型', baseUrl: community.baseUrl, apiKey: community.apiKey }
+    }
+    if (!Array.isArray(settings.value.apiKeys)) return null
     for (const p of settings.value.apiKeys) {
       if (p && p.apiKey && Array.isArray(p.models) && p.models.length > 0) {
         return { provider: p.provider, baseUrl: p.baseUrl, apiKey: p.apiKey }
@@ -205,7 +215,12 @@ export const useSettingsStore = defineStore('settings', () => {
 
   /** 根据模型名查找对应 API 配置 */
   function findProviderForModel(model: string): { baseUrl: string; apiKey: string } | null {
-    if (!settings.value || !Array.isArray(settings.value.apiKeys)) return null
+    if (!settings.value) return null
+    const community = settings.value.communityModel
+    if (community?.enabled && community.apiKey && community.model === model) {
+      return { baseUrl: community.baseUrl, apiKey: community.apiKey }
+    }
+    if (!Array.isArray(settings.value.apiKeys)) return null
     for (const p of settings.value.apiKeys) {
       if (Array.isArray(p.models) && p.models.includes(model) && p.apiKey) {
         return { baseUrl: p.baseUrl, apiKey: p.apiKey }

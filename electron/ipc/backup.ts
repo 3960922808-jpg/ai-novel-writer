@@ -20,6 +20,7 @@ function cloneData(includeSecrets: boolean): DBShape {
     if (Array.isArray(data.settings.apiKeys)) {
       data.settings.apiKeys = data.settings.apiKeys.map((item: any) => ({ ...item, apiKey: '' }))
     }
+    if (data.settings.communityModel) data.settings.communityModel.apiKey = ''
     data.settings.searchApiKey = ''
     if (data.settings.imageGen) {
       data.settings.imageGen.openaiApiKey = ''

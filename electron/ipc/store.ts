@@ -34,6 +34,9 @@ function protectSettingsSecrets(settings: any): any {
   return {
     ...settings,
     searchApiKey: encryptSecret(settings.searchApiKey),
+    communityModel: settings.communityModel
+      ? { ...settings.communityModel, apiKey: encryptSecret(settings.communityModel.apiKey) }
+      : undefined,
     apiKeys: Array.isArray(settings.apiKeys)
       ? settings.apiKeys.map((item: any) => ({ ...item, apiKey: encryptSecret(item?.apiKey) }))
       : []
@@ -45,6 +48,9 @@ function revealSettingsSecrets(settings: any): any {
   return {
     ...settings,
     searchApiKey: decryptSecret(settings.searchApiKey),
+    communityModel: settings.communityModel
+      ? { ...settings.communityModel, apiKey: decryptSecret(settings.communityModel.apiKey) }
+      : undefined,
     apiKeys: Array.isArray(settings.apiKeys)
       ? settings.apiKeys.map((item: any) => ({ ...item, apiKey: decryptSecret(item?.apiKey) }))
       : []
@@ -229,6 +235,13 @@ export function registerStoreIPC() {
           { provider: '智谱AI', baseUrl: 'https://api.z.ai/api/paas/v4', apiKey: '', models: ['glm-5.2', 'glm-5.2-air', 'glm-5.2-flash'] },
           { provider: 'MiniMax', baseUrl: 'https://api.minimax.chat/v1', apiKey: '', models: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.5'] }
         ],
+        communityModel: {
+          enabled: false,
+          baseUrl: 'https://integrate.api.nvidia.com/v1',
+          apiKey: '',
+          model: 'mistralai/mistral-nemotron',
+          models: ['mistralai/mistral-nemotron']
+        },
         theme: 'light',
         fontSize: 16,
         editorFont: '思源宋体, 宋体, serif',
@@ -305,6 +318,16 @@ export function registerStoreIPC() {
       db.data.settings.backgroundVideoPath = ''
       db.data.settings.backgroundVideoMuted = true
       db.data.settings.backgroundVideoPlaybackRate = 1
+      settingsChanged = true
+    }
+    if (db.data.settings && !db.data.settings.communityModel) {
+      db.data.settings.communityModel = {
+        enabled: false,
+        baseUrl: 'https://integrate.api.nvidia.com/v1',
+        apiKey: '',
+        model: 'mistralai/mistral-nemotron',
+        models: ['mistralai/mistral-nemotron']
+      }
       settingsChanged = true
     }
     if (safeStorage.isEncryptionAvailable()) {
