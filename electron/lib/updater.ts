@@ -47,6 +47,7 @@ const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000 // 下载 5 分钟超时
 let timer: NodeJS.Timeout | null = null
 let initialTimer: NodeJS.Timeout | null = null
 let lastKnownVersion = ''
+let lastNotifiedVersion = ''
 let isChecking = false
 let isDownloading = false
 
@@ -320,17 +321,17 @@ async function checkOnce(opts: { silent?: boolean } = {}): Promise<{ updated: bo
     const remoteVersion = release.tag_name.replace(/^v/, '')
     const localVersion = getLocalVersion()
     const s = getSettings()
-    // 首次启动：只记录版本号，不弹提示
+    // 首次启动也要比较本地版本，否则旧安装首次运行时会错过更新。
     if (!s.lastKnownVersion) {
       lastKnownVersion = remoteVersion
       persistVersion(remoteVersion)
-      return { updated: false, version: remoteVersion, release }
     }
-    // 远程版本号比本地高，且比上次记录的高 → 有更新
+    // 远程版本号比本地高即有更新；同一运行周期只主动弹一次，避免每轮检查打扰。
     if (compareVersions(remoteVersion, localVersion) > 0) {
       lastKnownVersion = remoteVersion
       persistVersion(remoteVersion)
-      if (!opts.silent) {
+      if (!opts.silent && lastNotifiedVersion !== remoteVersion) {
+        lastNotifiedVersion = remoteVersion
         notifyUpdate(release)
       }
       return { updated: true, version: remoteVersion, release }
@@ -479,8 +480,8 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
       reader.on('end', () => {
         if (downloadTimer) clearTimeout(downloadTimer)
         fileStream.end(() => {
-          // 直接跳到 100%，明确告诉用户"下载完成"
-          sendProgress(100, '下载完成，3 秒后自动重启应用...')
+          // 下载完成后还需要校验，不能提前显示 100%。
+          sendProgress(95, '下载完成，正在准备校验...')
           resolve()
         })
       })
@@ -507,8 +508,7 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
 
     // 安装包：用 NSIS /S 静默安装，自动覆盖旧文件
     if (/\.exe$/i.test(asset.name)) {
-      // 进度条已走满 100%，明确告诉用户下载成功
-      sendProgress(100, '下载完成，3 秒后自动重启应用...')
+      sendProgress(100, '校验通过，3 秒后自动安装并重启...')
 
       // 等 3 秒让用户看到"下载成功"提示和进度条满格状态
       await new Promise(r => setTimeout(r, 3000))

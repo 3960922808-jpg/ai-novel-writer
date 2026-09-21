@@ -6,6 +6,12 @@ $ErrorActionPreference = 'Stop'
 $repo = '3960922808-jpg/ai-novel-writer'
 $token = $env:GH_TOKEN
 if (-not $token) {
+  $credentialLines = "protocol=https`nhost=github.com`n`n" | git credential fill 2>$null
+  foreach ($line in $credentialLines) {
+    if ($line -like 'password=*') { $token = $line.Substring(9); break }
+  }
+}
+if (-not $token) {
   Write-Host "ERROR: GH_TOKEN environment variable is not set." -ForegroundColor Red
   Write-Host "Set it with:  `$env:GH_TOKEN = 'ghp_xxx'"
   exit 1
@@ -27,6 +33,7 @@ $headers = @{
 $setupExe = Join-Path $PSScriptRoot "release\TrmWrite-Setup-$version.exe"
 $portableZip = Join-Path $PSScriptRoot "release\TrmWrite-$version-x64.zip"
 $portableExe = Join-Path $PSScriptRoot "release\TrmWrite-Portable-$version-x64.exe"
+$checksums = Join-Path $PSScriptRoot 'release\SHA256SUMS.txt'
 
 $assets = @()
 if (Test-Path $setupExe) {
@@ -43,6 +50,11 @@ if (Test-Path $portableExe) {
   $assets += $portableExe
 } else {
   Write-Host "WARN: Portable exe not found at: $portableExe" -ForegroundColor Yellow
+}
+if (Test-Path $checksums) {
+  $assets += $checksums
+} else {
+  Write-Host "WARN: SHA256SUMS.txt not found at: $checksums" -ForegroundColor Yellow
 }
 if ($assets.Count -eq 0) {
   Write-Host "ERROR: No exe files found. Run 'npm run build:win' first." -ForegroundColor Red
@@ -64,7 +76,7 @@ if (-not $release) {
   $body = @{
     tag_name    = $tagName
     name        = "TrmWrite $version"
-    body        = "版本 $version 发布。`n`n- 安装包：双击 Setup.exe 安装`n- 免安装版：解压 zip 后运行 TrmWrite.exe"
+    body        = "版本 $version 发布。`n`n- 新增软件内下载、真实进度、SHA-256 校验与自动安装重启`n- 修复首次运行旧版本无法收到更新提示的问题`n- 同一运行周期只主动提示一次，避免重复打扰`n- 安装包：双击 Setup.exe 安装`n- 免安装版：可直接运行 Portable.exe，或解压 zip 后运行 TrmWrite.exe"
     draft       = $false
     prerelease  = $false
   } | ConvertTo-Json

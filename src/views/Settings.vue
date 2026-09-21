@@ -519,6 +519,12 @@
           </span>
         </el-form-item>
 
+        <el-form-item label="更新方式">
+          <span class="text-faint text-xs">
+            软件内下载并校验安装包，完成后自动退出、安装和重启；浏览器下载保留为备用方式
+          </span>
+        </el-form-item>
+
         <el-form-item label="手动检查">
           <div class="update-check-row">
             <el-button type="primary" :loading="checking" :icon="Refresh" @click="checkNow">
