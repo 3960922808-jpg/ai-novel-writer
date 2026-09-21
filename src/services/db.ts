@@ -152,6 +152,9 @@ export interface ChatMessageRecord {
   }>
   skillId?: string
   skillName?: string
+  /** 本轮启用的全部技能；skillId/skillName 保留用于兼容旧记录。 */
+  skillIds?: string[]
+  skillNames?: string[]
   promptId?: string
   canvasLinked?: boolean
   createdAt: number

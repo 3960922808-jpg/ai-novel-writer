@@ -76,7 +76,7 @@ if (-not $release) {
   $body = @{
     tag_name    = $tagName
     name        = "TrmWrite $version"
-    body        = "版本 $version 发布。`n`n- 新增软件内下载、真实进度、SHA-256 校验与自动安装重启`n- 修复首次运行旧版本无法收到更新提示的问题`n- 同一运行周期只主动提示一次，避免重复打扰`n- 安装包：双击 Setup.exe 安装`n- 免安装版：可直接运行 Portable.exe，或解压 zip 后运行 TrmWrite.exe"
+    body        = "版本 $version 发布。`n`n- Skill 支持多选组合，多个技能规则和任务会真正进入模型请求`n- @ 关联内容支持分类多选、同名来源精确识别和实际引用预览`n- 添加文件支持一次选择并读取多个 TXT、Markdown 或 DOCX`n- 对话历史保存全部技能与资料快照，兼容旧版单技能记录`n- 安装包：双击 Setup.exe 安装`n- 免安装版：可直接运行 Portable.exe，或解压 zip 后运行 TrmWrite.exe"
     draft       = $false
     prerelease  = $false
   } | ConvertTo-Json

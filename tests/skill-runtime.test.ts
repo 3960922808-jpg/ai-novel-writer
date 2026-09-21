@@ -4,11 +4,22 @@ import { appendSkillSupplement, buildLinkedReferenceBlock, buildSkillReferenceBl
 describe('技能与关联资料运行时', () => {
   it('会把技能包参考资料放进真实请求文本', () => {
     const text = buildSkillReferenceBlock({
+      name: '人物一致性检查',
       referenceFiles: [{ name: '人物设定.md', content: '主角不能使用魔法。' }]
     })
     expect(text).toContain('技能参考资料')
     expect(text).toContain('人物设定.md')
     expect(text).toContain('主角不能使用魔法。')
+  })
+
+  it('会合并多个技能的参考资料并保留技能来源', () => {
+    const text = buildSkillReferenceBlock([
+      { name: '节奏检查', referenceFiles: [{ name: '规则.md', content: '场景必须有转折。' }] },
+      { name: '人物检查', referenceFiles: [{ name: '规则.md', content: '行为必须符合动机。' }] }
+    ])
+    expect(text).toContain('节奏检查 / 规则.md')
+    expect(text).toContain('人物检查 / 规则.md')
+    expect(text).toContain('行为必须符合动机。')
   })
 
   it('会把 @ 和附件内容标明来源后放进真实请求文本', () => {

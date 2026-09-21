@@ -134,7 +134,7 @@
             </button>
           </div>
           <div class="analysis-actions">
-            <el-button size="small" :icon="Upload" @click="uploadAttachment">上传文件</el-button>
+            <el-button size="small" :icon="Upload" @click="uploadAttachments">上传文件</el-button>
             <el-button size="small" :icon="Download" @click="exportCurrent">导出</el-button>
           </div>
           <!-- 保存作品按钮（位于上传文件/导出下方） -->
@@ -330,17 +330,18 @@
         <!-- 关联片段 -->
         <div class="link-section">
           <div class="link-row">
-            <el-button text size="small" :icon="Link" @click="linkCurrentChapter">@关联内容</el-button>
-            <el-button text size="small" :icon="Upload" @click="uploadAttachment">添加文件</el-button>
-            <button v-if="linkedItems.length || pendingSkill?.referenceFiles?.length" class="reference-preview-btn" @click="contextPreviewVisible = true">
-              已准备 {{ linkedItems.length }} 项关联内容 · {{ linkedWordsCount }} 字<span v-if="pendingSkill?.referenceFiles?.length"> + {{ pendingSkill.referenceFiles.length }} 份技能资料</span> · 查看
+            <el-button text size="small" :icon="MagicStick" @click="openSkillPicker">选择 Skill（可多选）</el-button>
+            <el-button text size="small" :icon="Link" @click="openAtPicker">@ 关联内容（可多选）</el-button>
+            <el-button text size="small" :icon="Upload" @click="uploadAttachments">添加文件（可多选）</el-button>
+            <button v-if="linkedItems.length || selectedSkillReferenceCount" class="reference-preview-btn" @click="contextPreviewVisible = true">
+              已准备 {{ linkedItems.length }} 项关联内容 · {{ linkedWordsCount }} 字<span v-if="selectedSkillReferenceCount"> + {{ selectedSkillReferenceCount }} 份技能资料</span> · 查看实际引用
             </button>
             <span v-else class="text-faint text-xs">尚未关联资料</span>
           </div>
           <div class="linked-tags" v-if="linkedItems.length">
             <el-tag
               v-for="(item, i) in linkedItems"
-              :key="i"
+              :key="(item.type || '资料') + '|' + (item.sourceId || item.label)"
               size="small"
               closable
               @close="linkedItems.splice(i, 1)"
@@ -350,18 +351,20 @@
 
         <!-- 指令输入区 -->
         <div class="input-area">
-          <!-- 已选技能 chip -->
-          <div v-if="pendingSkill" class="skill-chip-row">
+          <!-- 已选技能 chip（允许组合多个技能） -->
+          <div v-if="pendingSkills.length" class="skill-chip-row">
             <el-tag
+              v-for="skill in pendingSkills"
+              :key="skill.id"
               type="primary"
               size="small"
               closable
-              @close="clearPendingSkill"
+              @close="removePendingSkill(skill.id)"
             >
               <el-icon style="vertical-align: -2px; margin-right: 2px"><MagicStick /></el-icon>
-              {{ pendingSkill.name }}
+              {{ skill.name }}
             </el-tag>
-            <span class="text-faint text-xs">技能已选中，输入补充说明后发送（或直接发送）</span>
+            <span class="text-faint text-xs">已组合 {{ pendingSkills.length }} 个技能，将按顺序共同执行</span>
           </div>
           <div class="chat-input-wrap">
             <textarea
@@ -392,17 +395,18 @@
           <!-- 技能弹出菜单 -->
           <div v-if="slashMenuVisible" class="slash-menu">
             <div class="slash-menu-header">
-              <span>技能列表</span>
-              <span class="text-faint text-xs">{{ filteredSkills.length }} 个</span>
+              <span>选择 Skill（可多选）</span>
+              <span class="text-faint text-xs">已选 {{ pendingSkills.length }} 个</span>
             </div>
             <div class="slash-menu-list">
               <button
                 v-for="s in filteredSkills"
                 :key="s.id"
                 class="slash-menu-item"
-                @click="pickSkill(s)"
+                :class="{ selected: isSkillSelected(s.id) }"
+                @click="toggleSkill(s)"
               >
-                <el-icon class="slash-icon"><MagicStick /></el-icon>
+                <el-icon class="slash-icon"><Checked v-if="isSkillSelected(s.id)" /><MagicStick v-else /></el-icon>
                 <div class="slash-item-body">
                   <div class="slash-item-name">{{ s.name }}</div>
                   <div class="slash-item-desc text-faint text-xs">{{ s.description || s.category }}</div>
@@ -411,6 +415,10 @@
               <div v-if="filteredSkills.length === 0" class="slash-empty text-faint text-xs">
                 没有匹配的技能
               </div>
+            </div>
+            <div class="slash-menu-footer">
+              <el-button size="small" text @click="clearPendingSkills">清空</el-button>
+              <el-button size="small" round type="primary" @click="finishSkillPicker">完成选择（{{ pendingSkills.length }}）</el-button>
             </div>
           </div>
 
@@ -545,14 +553,14 @@
             <div v-if="atPickerCollapsed[g.type] === false" class="at-group-body">
               <label
                 v-for="m in g.items"
-                :key="m.type + '|' + m.label"
+                :key="atMatchKey(m)"
                 class="at-item"
-                :class="{ checked: atPickerSelected.has(m.type + '|' + m.label) }"
+                :class="{ checked: atPickerSelected.has(atMatchKey(m)) }"
               >
                 <input
                   type="checkbox"
                   class="at-item-check"
-                  :checked="atPickerSelected.has(m.type + '|' + m.label)"
+                  :checked="atPickerSelected.has(atMatchKey(m))"
                   @change="toggleAtPickerItem(m)"
                 />
                 <el-icon class="at-item-icon"><component :is="m.icon" /></el-icon>
@@ -581,9 +589,9 @@
       <div class="reference-preview-note">
         下列内容会拼入本次模型请求，并随对话记录保存；重启软件后仍可恢复，不是只显示标签。
       </div>
-      <div v-if="pendingSkill?.referenceFiles?.length" class="reference-preview-group">
-        <h4>技能「{{ pendingSkill.name }}」自带资料</h4>
-        <div v-for="file in pendingSkill.referenceFiles" :key="file.name" class="reference-preview-item">
+      <div v-for="skill in pendingSkillsWithReferences" :key="skill.id" class="reference-preview-group">
+        <h4>技能「{{ skill.name }}」自带资料</h4>
+        <div v-for="file in skill.referenceFiles" :key="skill.id + '|' + file.name" class="reference-preview-item">
           <strong>{{ file.name }}</strong><span>{{ file.content.length }} 字</span>
           <p>{{ file.content.slice(0, 260) }}<template v-if="file.content.length > 260">……</template></p>
         </div>
@@ -595,7 +603,7 @@
           <p>{{ item.content.slice(0, 260) }}<template v-if="item.content.length > 260">……</template></p>
         </div>
       </div>
-      <el-empty v-if="!linkedItems.length && !pendingSkill?.referenceFiles?.length" description="本次还没有关联资料" />
+      <el-empty v-if="!linkedItems.length && !selectedSkillReferenceCount" description="本次还没有关联资料" />
     </el-dialog>
 
     <el-dialog v-model="chapterOrganizerVisible" title="本章资料整理 · 确认后才会保存" width="720px" append-to-body>
@@ -807,7 +815,7 @@ async function newConversation() {
   rememberEditorSession(pid, chapterId, createEditorSessionId(chapterId))
   chatMessages.value = []
   linkedItems.value = []
-  pendingSkill.value = null
+  pendingSkills.value = []
   selectedPromptId.value = ''
   userInput.value = ''
   ElMessage.success('已新建对话')
@@ -997,6 +1005,8 @@ interface EditorChatMessage {
   linkedItems?: LinkedContextItem[]
   skillId?: string
   skillName?: string
+  skillIds?: string[]
+  skillNames?: string[]
   promptId?: string
   canvasLinked?: boolean
 }
@@ -1031,6 +1041,8 @@ async function pushMsg(msg: Omit<EditorChatMessage, 'id'>): Promise<EditorChatMe
       linkedItems: msg.linkedItems,
       skillId: msg.skillId,
       skillName: msg.skillName,
+      skillIds: msg.skillIds,
+      skillNames: msg.skillNames,
       promptId: msg.promptId,
       canvasLinked: msg.canvasLinked,
         createdAt: Date.now()
@@ -1077,13 +1089,20 @@ async function loadChatHistory() {
       linkedItems: r.linkedItems,
       skillId: r.skillId,
       skillName: r.skillName,
+      skillIds: r.skillIds,
+      skillNames: r.skillNames,
       promptId: r.promptId,
       canvasLinked: r.canvasLinked
     }))
     // 恢复最近一次发送时真实使用的上下文，而不是只恢复界面上的 @ 标签。
     const lastUser = [...chatMessages.value].reverse().find(message => message.role === 'user')
     linkedItems.value = lastUser?.linkedItems?.map(item => ({ ...item })) || []
-    pendingSkill.value = lastUser?.skillId ? (skills.value.find(item => item.id === lastUser.skillId) || null) : null
+    const restoredSkillIds = lastUser?.skillIds?.length
+      ? lastUser.skillIds
+      : (lastUser?.skillId ? [lastUser.skillId] : [])
+    pendingSkills.value = restoredSkillIds
+      .map(id => skills.value.find(item => item.id === id))
+      .filter((item): item is Skill => !!item)
     selectedPromptId.value = lastUser?.promptId || ''
     if (lastUser?.canvasLinked) {
       canvasWorkflow.value = orderCanvasNodes(contextCanvasNodes.value)
@@ -1197,27 +1216,33 @@ function linkCurrentChapter() {
   ElMessage.success('已关联当前章节')
 }
 
-async function uploadAttachment() {
+async function uploadAttachments() {
   try {
     const selected = await window.api.file.selectNovel()
-    const filePath = Array.isArray(selected) ? selected[0] : selected
-    if (!filePath || typeof filePath !== 'string') return
-    ElMessage.info('正在读取文件...')
-    const result = await window.api.file.readNovelText(filePath)
-    const text = typeof result === 'string' ? result : (result?.content || '')
-    if (!text || !text.trim()) {
-      ElMessage.warning('文件内容为空')
-      return
+    const filePaths = (Array.isArray(selected) ? selected : [selected])
+      .filter((item): item is string => typeof item === 'string' && !!item)
+    if (!filePaths.length) return
+    ElMessage.info(`正在读取 ${filePaths.length} 个文件...`)
+    const settled = await Promise.allSettled(filePaths.map(async filePath => {
+      const result = await window.api.file.readNovelText(filePath)
+      const text = typeof result === 'string' ? result : (result?.content || '')
+      if (!text?.trim()) throw new Error('文件内容为空')
+      const fileName = filePath.split(/[\\/]/).pop() || '附件'
+      const sourceId = `attachment:${fileName}:${text.length}`
+      const truncated = text.length > 12_000 ? text.slice(0, 12_000) + '\n……（文件过长，已截取）' : text
+      return { sourceId, type: '附件', label: fileName, content: truncated }
+    }))
+    let added = 0
+    let failed = 0
+    for (const result of settled) {
+      if (result.status === 'rejected') { failed++; continue }
+      const item = result.value
+      const index = linkedItems.value.findIndex(existing => existing.sourceId === item.sourceId)
+      if (index >= 0) linkedItems.value[index] = item
+      else { linkedItems.value.push(item); added++ }
     }
-    // 截断过长内容，避免撑爆上下文
-    const truncated = text.length > 8000 ? text.slice(0, 8000) + '\n...(内容过长已截断)' : text
-    const fileName = filePath.split(/[\\/]/).pop() || '附件'
-    linkedItems.value.push({
-      type: '附件',
-      label: fileName,
-      content: truncated
-    })
-    ElMessage.success(`已添加文件：${fileName}（${text.length} 字）`)
+    if (added) ElMessage.success(`已添加 ${added} 个文件，发送时会读取文件正文`)
+    if (failed) ElMessage.warning(`${failed} 个文件为空或读取失败`)
   } catch (e: any) {
     ElMessage.error('添加文件失败：' + (e?.message || ''))
   }
@@ -1244,6 +1269,10 @@ interface AtMatch {
 }
 const atMenuVisible = ref(false)
 const atMatches = ref<AtMatch[]>([])
+
+function atMatchKey(item: Pick<AtMatch, 'sourceId' | 'type' | 'label'>): string {
+  return `${item.type}|${item.sourceId || item.label}`
+}
 
 const filteredSkills = computed(() => {
   if (!slashKeyword.value) return skills.value
@@ -1369,7 +1398,7 @@ function pickAtMatch(m: AtMatch) {
   const newText = before.slice(0, atIdx) + `@${m.label} ` + after
   userInput.value = newText
   // 塞入关联内容
-  const exists = linkedItems.value.some(item => item.type === m.type && item.sourceId === m.sourceId && item.label === m.label)
+  const exists = linkedItems.value.some(item => atMatchKey(item as AtMatch) === atMatchKey(m))
   if (!exists) linkedItems.value.push({ sourceId: m.sourceId, type: m.type, label: m.label, content: m.content, updatedAt: m.updatedAt })
   atMenuVisible.value = false
   ElMessage.success(`已关联${m.type}：${m.label}`)
@@ -1379,7 +1408,7 @@ function pickAtMatch(m: AtMatch) {
 // ===== @ 多选关联小窗 =====
 const atPickerVisible = ref(false)
 const atPickerKeyword = ref('')
-// 用 Set 存放 key（type|label），避免重复
+// 用来源 id 作为 key，同名章节/设定也不会互相覆盖。
 const atPickerSelected = ref<Set<string>>(new Set())
 // 待选条目（与 atMatches 同源，但不过滤关键词时返回全部）
 const atPickerAllItems = ref<AtMatch[]>([])
@@ -1396,9 +1425,11 @@ function openAtPicker() {
   atPickerKeyword.value = ''
   atPickerSelected.value = new Set(
     linkedItems.value.map(it => {
-      // 通过 label 反查 type（粗略匹配）
-      const found = atPickerAllItems.value.find(m => m.label === it.label)
-      return found ? `${found.type}|${found.label}` : `已关联|${it.label}`
+      const found = atPickerAllItems.value.find(m =>
+        (it.sourceId && m.sourceId === it.sourceId && m.type === it.type) ||
+        (!it.sourceId && m.label === it.label && m.type === it.type)
+      )
+      return found ? atMatchKey(found) : `已关联|${it.sourceId || it.label}`
     })
   )
   // 默认展开所有分组
@@ -1448,7 +1479,7 @@ function toggleGroup(type: string) {
 
 /** 勾选/取消勾选某项 */
 function toggleAtPickerItem(m: AtMatch) {
-  const key = `${m.type}|${m.label}`
+  const key = atMatchKey(m)
   const s = new Set(atPickerSelected.value)
   if (s.has(key)) s.delete(key)
   else s.add(key)
@@ -1459,7 +1490,7 @@ function toggleAtPickerItem(m: AtMatch) {
 function selectAllInPicker() {
   const s = new Set(atPickerSelected.value)
   for (const g of atPickerGrouped.value) {
-    for (const m of g.items) s.add(`${m.type}|${m.label}`)
+    for (const m of g.items) s.add(atMatchKey(m))
   }
   atPickerSelected.value = s
 }
@@ -1474,23 +1505,24 @@ function confirmAtPicker() {
   // 找出所有被选中的 AtMatch
   const selectedMatches: AtMatch[] = []
   for (const m of atPickerAllItems.value) {
-    if (atPickerSelected.value.has(`${m.type}|${m.label}`)) {
+    if (atPickerSelected.value.has(atMatchKey(m))) {
       selectedMatches.push(m)
     }
   }
   // 找出已存在但本次未选中的（需要移除）
-  const newLabels = new Set(selectedMatches.map(m => m.label))
+  const selectedKeys = new Set(selectedMatches.map(atMatchKey))
   // 保留：① 不在 atPickerAllItems 中的（用户外部添加的），② 在新选中的
   linkedItems.value = linkedItems.value.filter(it => {
     // 在 picker 列表中但未选中 → 移除
-    const inPicker = atPickerAllItems.value.some(m => m.label === it.label)
-    if (inPicker && !newLabels.has(it.label)) return false
+    const key = atMatchKey(it as AtMatch)
+    const inPicker = atPickerAllItems.value.some(m => atMatchKey(m) === key)
+    if (inPicker && !selectedKeys.has(key)) return false
     return true
   })
   // 追加新选中的（避免重复）
-  const existing = new Set(linkedItems.value.map(it => it.label))
+  const existing = new Set(linkedItems.value.map(it => atMatchKey(it as AtMatch)))
   for (const m of selectedMatches) {
-    if (!existing.has(m.label)) {
+    if (!existing.has(atMatchKey(m))) {
       linkedItems.value.push({ sourceId: m.sourceId, type: m.type, label: m.label, content: m.content, updatedAt: m.updatedAt })
     }
   }
@@ -1545,31 +1577,51 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-function pickSkill(s: Skill) {
-  // 只标记选中的技能，不把模板填入输入框
-  // 变量在发送时自动用上下文填充
-  pendingSkill.value = s
+const pendingSkills = ref<Skill[]>([])
+const pendingSkillsWithReferences = computed(() => pendingSkills.value.filter(skill => skill.referenceFiles?.length))
+const selectedSkillReferenceCount = computed(() => pendingSkills.value.reduce((sum, skill) => sum + (skill.referenceFiles?.length || 0), 0))
+
+function isSkillSelected(id: string) {
+  return pendingSkills.value.some(skill => skill.id === id)
+}
+
+function toggleSkill(skill: Skill) {
+  if (isSkillSelected(skill.id)) {
+    pendingSkills.value = pendingSkills.value.filter(item => item.id !== skill.id)
+  } else {
+    pendingSkills.value = [...pendingSkills.value, skill]
+  }
+}
+
+function removePendingSkill(id: string) {
+  pendingSkills.value = pendingSkills.value.filter(skill => skill.id !== id)
+}
+
+function clearPendingSkills() {
+  pendingSkills.value = []
+}
+
+function openSkillPicker() {
+  slashKeyword.value = ''
+  slashMenuVisible.value = true
+  atMenuVisible.value = false
+}
+
+function finishSkillPicker() {
   slashMenuVisible.value = false
-  userInput.value = '' // 清空输入框（去掉 / 输入）
-  ElMessage.success(`已选择技能「${s.name}」，可直接发送或输入补充说明`)
-  // 焦点回到输入框
+  if (userInput.value.startsWith('/')) userInput.value = ''
+  if (pendingSkills.value.length) ElMessage.success(`已组合 ${pendingSkills.value.length} 个技能`)
   nextTick(() => inputRef.value?.focus())
 }
 
-function clearPendingSkill() {
-  pendingSkill.value = null
-}
-
-const pendingSkill = ref<Skill | null>(null)
-
-const canSend = computed(() => (userInput.value.trim() || linkedItems.value.length > 0 || selectedPromptId.value || pendingSkill.value) && !generating.value)
+const canSend = computed(() => (userInput.value.trim() || linkedItems.value.length > 0 || selectedPromptId.value || pendingSkills.value.length > 0) && !generating.value)
 
 function stripLinkedMentions(text: string): string {
   let cleaned = text
   for (const item of linkedItems.value) {
     cleaned = cleaned.replaceAll(`@${item.label}`, '')
   }
-  return cleaned.replace(/@[^\s@]+(?:\s+|$)/g, '').replace(/\s+/g, ' ').trim()
+  return cleaned.replace(/\s+/g, ' ').trim()
 }
 
 function getProvider() {
@@ -1579,9 +1631,12 @@ function getProvider() {
 
 async function sendChat() {
   if (!canSend.value || !project.value) return
-  const activeSkill = pendingSkill.value
+  const activeSkills = [...pendingSkills.value]
+  const primarySkill = activeSkills[0]
   const activePromptId = selectedPromptId.value
-  const preferredSkillModel = activeSkill?.recommendedModel?.trim() || ''
+  const preferredSkillModel = activeSkills
+    .map(skill => skill.recommendedModel?.trim() || '')
+    .find(model => model && settings.findProviderForModel(model)) || ''
   const requestModel = preferredSkillModel && settings.findProviderForModel(preferredSkillModel)
     ? preferredSkillModel
     : (aiModel.value || project.value.settings.model)
@@ -1594,12 +1649,12 @@ async function sendChat() {
   const rawUserMsg = userInput.value.trim()
   const userMsg = stripLinkedMentions(rawUserMsg)
   // 如果选了技能但没输入，也算有效（直接用技能模板）
-  if (!rawUserMsg && linkedItems.value.length === 0 && !activeSkill && !activePromptId) return
+  if (!rawUserMsg && linkedItems.value.length === 0 && !activeSkills.length && !activePromptId) return
 
   // 显示给用户的消息：技能 chip + 补充说明
   const linkedLabels = linkedItems.value.map(i => `@${i.label}`).join(' ')
-  const displayMsg = activeSkill
-    ? `[技能：${activeSkill.name}]${userMsg ? '\n' + userMsg : ''}${linkedLabels ? '\n' + linkedLabels : ''}`
+  const displayMsg = activeSkills.length
+    ? `[技能：${activeSkills.map(skill => skill.name).join('、')}]${userMsg ? '\n' + userMsg : ''}${linkedLabels ? '\n' + linkedLabels : ''}`
     : (userMsg || linkedLabels)
   generating.value = true
   aiStreamingText.value = ''
@@ -1631,13 +1686,13 @@ async function sendChat() {
     : ''
   // @ 关联内容：所有分支都应注入到 userContent，确保 AI 能看到
   const linkedContent = buildLinkedReferenceBlock(linkedItems.value)
-  const skillReferenceContent = buildSkillReferenceBlock(activeSkill)
+  const skillReferenceContent = buildSkillReferenceBlock(activeSkills)
   // 用户要求：@ 关联存在时，不发送章节正文，只发 @ 关联文件内容
   const hasLinked = !!linkedContent
   let searchCtx = ''
-  const skillNeedsSearch = !!activeSkill?.variables?.includes('searchResults')
+  const skillNeedsSearch = activeSkills.some(skill => skill.variables?.includes('searchResults'))
   if (webSearchEnabled.value || skillNeedsSearch) {
-    const query = userMsg || activeSkill?.name || project.value.title
+    const query = userMsg || activeSkills.map(skill => skill.name).join(' ') || project.value.title
     searchCtx = await searchAndBuildContext(query, 6)
   }
   const fillVars = (extra: Record<string, string> = {}): Record<string, string> => ({
@@ -1660,23 +1715,32 @@ async function sendChat() {
     ...extra
   })
 
-  if (activeSkill) {
-    // 使用技能的 system + user 模板，自动填充变量
+  if (activeSkills.length) {
+    // 多个技能按选择顺序组合。每个技能都保留自己的系统约束、任务模板和来源标题。
     const fallback = linkedContent || userMsg || ctx
     const vars = fillVars()
-    const requiredVariables = new Set([
-      ...(activeSkill.variables || []),
-      ...aiSvc.extractVariables(activeSkill.systemPrompt || ''),
-      ...aiSvc.extractVariables(activeSkill.userPrompt || '')
-    ])
-    for (const variable of requiredVariables) {
-      if (!vars[variable]) vars[variable] = fallback
+    const allRequiredVariables = new Set<string>()
+    const systemBlocks: string[] = []
+    const taskBlocks: string[] = []
+    for (const [index, skill] of activeSkills.entries()) {
+      const requiredVariables = new Set([
+        ...(skill.variables || []),
+        ...aiSvc.extractVariables(skill.systemPrompt || ''),
+        ...aiSvc.extractVariables(skill.userPrompt || '')
+      ])
+      for (const variable of requiredVariables) {
+        allRequiredVariables.add(variable)
+        if (!vars[variable]) vars[variable] = fallback
+      }
+      if (skill.systemPrompt?.trim()) {
+        systemBlocks.push(`【技能 ${index + 1}：${skill.name} · 系统规则】\n${aiSvc.renderTemplate(skill.systemPrompt, vars)}`)
+      }
+      const renderedTask = aiSvc.renderTemplate(skill.userPrompt || skill.description || skill.name, vars).trim()
+      taskBlocks.push(`【技能 ${index + 1}：${skill.name} · 执行任务】\n${renderedTask}`)
     }
-    sysContent = activeSkill.systemPrompt ? aiSvc.renderTemplate(activeSkill.systemPrompt, vars) : sysContent
-    userContent = aiSvc.renderTemplate(activeSkill.userPrompt, vars)
-    // 模板没有接收补充要求的变量时，只追加用户说明，绝不能用它覆盖技能模板。
-    // 否则不含 {{变量}} 的技能会看似被选中、实际却完全没有发给模型。
-    userContent = appendSkillSupplement(userContent, userMsg, requiredVariables)
+    if (systemBlocks.length) sysContent += `\n\n【本轮组合技能】请同时遵守以下规则；冲突时以后选择的技能为准。\n${systemBlocks.join('\n\n')}`
+    userContent = taskBlocks.join('\n\n')
+    userContent = appendSkillSupplement(userContent, userMsg, allRequiredVariables)
     // 注入用户选择的关联内容与技能包参考资料；两者都会进入真实模型请求。
     if (linkedContent) {
       userContent += `\n\n${linkedContent}`
@@ -1723,8 +1787,10 @@ async function sendChat() {
     content: displayMsg,
     requestContent: userContent,
     linkedItems: contextSnapshot,
-    skillId: activeSkill?.id,
-    skillName: activeSkill?.name,
+    skillId: primarySkill?.id,
+    skillName: primarySkill?.name,
+    skillIds: activeSkills.map(skill => skill.id),
+    skillNames: activeSkills.map(skill => skill.name),
     promptId: activePromptId || undefined,
     canvasLinked: canvasLinked.value
   })
@@ -1734,7 +1800,7 @@ async function sendChat() {
     return
   }
   userInput.value = ''
-  pendingSkill.value = null
+  pendingSkills.value = []
   selectedPromptId.value = ''
 
   try {
@@ -1748,8 +1814,8 @@ async function sendChat() {
           ...priorConversation,
           { role: 'user', content: userContent }
         ],
-        temperature: activeSkill?.temperature ?? 0.8,
-        maxTokens: activeSkill?.maxTokens ?? 4096
+        temperature: primarySkill?.temperature ?? 0.8,
+        maxTokens: Math.max(...activeSkills.map(skill => skill.maxTokens || 4096), 4096)
       }),
       (chunk) => {
         if (stopFlag.value) return
@@ -1930,6 +1996,8 @@ async function persistChatMessage(msg: EditorChatMessage) {
     linkedItems: msg.linkedItems,
     skillId: msg.skillId,
     skillName: msg.skillName,
+    skillIds: msg.skillIds,
+    skillNames: msg.skillNames,
     promptId: msg.promptId,
     canvasLinked: msg.canvasLinked
   })
@@ -2137,7 +2205,10 @@ async function regenerateMsg(index: number) {
   }
   const userMsg = chatMessages.value[userIdx]
   linkedItems.value = userMsg.linkedItems?.map(item => ({ ...item })) || []
-  pendingSkill.value = userMsg.skillId ? (skills.value.find(item => item.id === userMsg.skillId) || null) : null
+  const skillIds = userMsg.skillIds?.length ? userMsg.skillIds : (userMsg.skillId ? [userMsg.skillId] : [])
+  pendingSkills.value = skillIds
+    .map(id => skills.value.find(item => item.id === id))
+    .filter((item): item is Skill => !!item)
   selectedPromptId.value = userMsg.promptId || ''
   // 提取原始指令文本（去掉技能前缀）
   let rawInput = userMsg.content || ''
@@ -2177,7 +2248,7 @@ async function runTopAction(action: string) {
   }
   const skill = skills.value.find(s => s.category === actionMap[action] || s.name.includes(actionMap[action]))
   if (skill) {
-    pendingSkill.value = skill
+    pendingSkills.value = [skill]
     userInput.value = action === 'typo' ? '请检查文本中的错别字与 AI 痕迹' : ''
     sendChat()
   } else {
@@ -3310,6 +3381,18 @@ html.dark .send-demand-btn:disabled {
   width: 100%;
 }
 .slash-menu-item:hover { background: #f7fafc; }
+.slash-menu-item.selected {
+  background: color-mix(in srgb, var(--primary) 10%, white);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 28%, transparent);
+}
+.slash-menu-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid #f1f2f5;
+}
 .slash-icon { color: #2563eb; font-size: 16px; }
 .slash-item-body { flex: 1; min-width: 0; }
 .slash-item-name { font-size: 13px; color: #2d3748; font-weight: 500; }

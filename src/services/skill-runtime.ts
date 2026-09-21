@@ -30,8 +30,18 @@ function boundedBlocks(
 }
 
 /** 生成技能包参考资料块。返回值会直接加入模型请求，而不只是显示在界面上。 */
-export function buildSkillReferenceBlock(skill?: Pick<Skill, 'referenceFiles'> | null): string {
-  return boundedBlocks(skill?.referenceFiles || [], '技能参考资料（请在执行任务时使用）', '技能文件')
+export function buildSkillReferenceBlock(
+  input?: Pick<Skill, 'name' | 'referenceFiles'> | Array<Pick<Skill, 'name' | 'referenceFiles'>> | null
+): string {
+  const skills = Array.isArray(input) ? input : (input ? [input] : [])
+  return boundedBlocks(
+    skills.flatMap(skill => (skill.referenceFiles || []).map(file => ({
+      name: `${skill.name} / ${file.name}`,
+      content: file.content
+    }))),
+    '技能参考资料（请在执行对应技能时使用）',
+    '技能文件'
+  )
 }
 
 /** 生成用户通过 @ 或“添加文件”明确选择的资料块。 */
