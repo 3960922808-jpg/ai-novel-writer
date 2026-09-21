@@ -13,7 +13,7 @@
  *
  * 网络优化（解决国内访问 GitHub 慢/失败的问题）：
  * - API 检查：依次尝试多个镜像源（api.github.com → ghproxy 镜像 → jsdelivr）
- * - 下载：优先 GitHub 直链，失败回退 ghproxy 加速
+ * - 下载：国内可用加速线路优先，连接失败、停滞或持续过慢时自动换线
  * - 超时：8 秒 AbortController，避免长时间挂起
  */
 import { app, BrowserWindow, Notification, shell } from 'electron'
@@ -34,15 +34,18 @@ const API_ENDPOINTS = [
 ]
 // ghproxy 下载加速前缀（用于 GitHub release assets 直链下载）
 const DOWNLOAD_PROXIES = [
-  '', // 直链优先
-  'https://ghproxy.com/',
   'https://gh-proxy.com/',
+  '',
+  'https://ghproxy.net/',
+  'https://ghproxy.com/',
   'https://mirror.ghproxy.com/'
 ]
 const INITIAL_DELAY_MS = 10_000
 const INTERVAL_MS = 30 * 60 * 1000 // 30 分钟
 const FETCH_TIMEOUT_MS = 8_000 // 8 秒超时
-const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000 // 下载 5 分钟超时
+const DOWNLOAD_STALL_MS = 30_000
+const MIN_HEALTHY_SPEED = 96 * 1024 // 连续低于 96 KB/s 自动换线
+const SPEED_CHECK_MS = 12_000
 
 let timer: NodeJS.Timeout | null = null
 let initialTimer: NodeJS.Timeout | null = null
@@ -388,122 +391,131 @@ export async function downloadAndRestart(): Promise<{ success: boolean; error?: 
     if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
     const savePath = path.join(cacheDir, asset.name)
     partialPath = `${savePath}.part`
-    if (fs.existsSync(partialPath)) fs.rmSync(partialPath, { force: true })
 
-    // 构造多个下载源（直链优先 → ghproxy 加速）
-    const downloadUrls = DOWNLOAD_PROXIES.map(p => p + asset.browser_download_url)
-
-    // 依次尝试下载源，成功即用
-    let resp: Response | null = null
-    let usedUrl = ''
-    let lastErr: any = null
-    for (const url of downloadUrls) {
-      try {
-        sendProgress(8, `正在连接下载源...`)
-        const controller = new AbortController()
-        const timeout = setTimeout(() => controller.abort(), 15_000) // 连接超时 15 秒
-        try {
-          const r = await fetch(url, {
-            headers: {
-              'User-Agent': 'ai-novel-writer-updater',
-              'Accept': 'application/octet-stream'
-            },
-            redirect: 'follow',
-            signal: controller.signal
-          })
-          if (!r.ok) {
-            lastErr = new Error(`HTTP ${r.status}`)
-            continue
-          }
-          if (!r.body) {
-            lastErr = new Error('无响应体')
-            continue
-          }
-          resp = r
-          usedUrl = url
-          console.log(`[updater] 下载源选择: ${url}`)
-          break
-        } finally {
-          clearTimeout(timeout)
-        }
-      } catch (e: any) {
-        lastErr = e
-        console.warn(`[updater] 下载源 ${url} 连接失败:`, e?.message || e)
+    // 已完整下载并校验过的安装包直接复用，重复点击更新时无需重新下载几十 MB。
+    if (fs.existsSync(savePath)) {
+      const cached = fs.statSync(savePath)
+      if (cached.size === asset.size && await sha256File(savePath) === expectedChecksum) {
+        sendProgress(96, '发现已下载且校验通过的安装包，正在准备安装...')
+      } else {
+        fs.rmSync(savePath, { force: true })
       }
     }
-    if (!resp) {
-      throw new Error(`所有下载源均不可用：${lastErr?.message || '未知错误'}。请前往 GitHub Release 页面手动下载。`)
+
+    // 国内实测可用加速线路优先；任何线路连接失败、停滞或持续过慢都会自动切换。
+    const downloadUrls = DOWNLOAD_PROXIES.map(p => p + asset.browser_download_url)
+    let lastErr: any = null
+    if (!fs.existsSync(savePath)) {
+      let downloaded = false
+      for (const [sourceIndex, url] of downloadUrls.entries()) {
+        if (fs.existsSync(partialPath)) fs.rmSync(partialPath, { force: true })
+        try {
+          sendProgress(8, `正在连接高速线路 ${sourceIndex + 1}/${downloadUrls.length}...`)
+          const controller = new AbortController()
+          const connectTimer = setTimeout(() => controller.abort(), 12_000)
+          let response: Response
+          try {
+            response = await fetch(url, {
+              headers: { 'User-Agent': 'ai-novel-writer-updater', Accept: 'application/octet-stream' },
+              redirect: 'follow',
+              signal: controller.signal
+            })
+          } finally {
+            clearTimeout(connectTimer)
+          }
+          if (!response.ok) throw new Error(`HTTP ${response.status}`)
+          if (!response.body) throw new Error('下载源没有返回文件内容')
+          console.log(`[updater] 正在尝试下载源 ${sourceIndex + 1}: ${url}`)
+
+          const fileStream = fs.createWriteStream(partialPath, { flags: 'w' })
+          const reader = Readable.fromWeb(response.body as any)
+          let received = 0
+          let lastPct = 10
+          let lastProgressAt = 0
+          let speedWindowAt = Date.now()
+          let speedWindowBytes = 0
+          let currentSpeed = 0
+          let stallTimer: NodeJS.Timeout | null = null
+          const resetStallTimer = () => {
+            if (stallTimer) clearTimeout(stallTimer)
+            stallTimer = setTimeout(() => reader.destroy(new Error('线路连续 30 秒没有数据')), DOWNLOAD_STALL_MS)
+          }
+          resetStallTimer()
+          const speedTimer = setInterval(() => {
+            const elapsed = Math.max(1, Date.now() - speedWindowAt)
+            currentSpeed = speedWindowBytes * 1000 / elapsed
+            if (received < asset.size && currentSpeed < MIN_HEALTHY_SPEED) {
+              reader.destroy(new Error(`线路速度过低（${Math.round(currentSpeed / 1024)} KB/s）`))
+            }
+            speedWindowAt = Date.now()
+            speedWindowBytes = 0
+          }, SPEED_CHECK_MS)
+
+          await new Promise<void>((resolve, reject) => {
+            let settled = false
+            const finish = (error?: Error) => {
+              if (settled) return
+              settled = true
+              if (stallTimer) clearTimeout(stallTimer)
+              clearInterval(speedTimer)
+              if (error) {
+                fileStream.destroy()
+                reject(error)
+              } else {
+                fileStream.end(resolve)
+              }
+            }
+            reader.on('data', (chunk: Buffer) => {
+              resetStallTimer()
+              received += chunk.length
+              speedWindowBytes += chunk.length
+              if (!fileStream.write(chunk)) reader.pause()
+              const pct = Math.min(95, 10 + Math.floor((received / asset.size) * 85))
+              const now = Date.now()
+              if (pct > lastPct || now - lastProgressAt >= 1500) {
+                lastPct = Math.max(lastPct, pct)
+                lastProgressAt = now
+                const mb = (received / 1024 / 1024).toFixed(1)
+                const totalMb = (asset.size / 1024 / 1024).toFixed(1)
+                const speed = currentSpeed > 0 ? ` · ${(currentSpeed / 1024).toFixed(0)} KB/s` : ''
+                sendProgress(lastPct, `线路 ${sourceIndex + 1}：${mb}/${totalMb} MB${speed}`)
+              }
+            })
+            fileStream.on('drain', () => reader.resume())
+            reader.on('end', () => finish())
+            reader.on('error', (error: Error) => finish(error))
+            fileStream.on('error', (error: Error) => finish(error))
+          })
+
+          const stat = fs.statSync(partialPath)
+          if (stat.size !== asset.size) throw new Error(`文件大小不匹配（${stat.size}/${asset.size}）`)
+          downloaded = true
+          sendProgress(95, '下载完成，正在准备校验...')
+          console.log(`[updater] 下载源 ${sourceIndex + 1} 完成`)
+          break
+        } catch (e: any) {
+          lastErr = e
+          if (fs.existsSync(partialPath)) fs.rmSync(partialPath, { force: true })
+          console.warn(`[updater] 下载源 ${sourceIndex + 1} 失败，准备换线:`, e?.message || e)
+          sendProgress(10, `线路 ${sourceIndex + 1} 不稳定，正在自动切换...`)
+        }
+      }
+      if (!downloaded) {
+        throw new Error(`所有内置线路均不可用：${lastErr?.message || '未知错误'}。可使用浏览器下载备用安装包。`)
+      }
     }
 
-    const totalStr = resp.headers.get('content-length') || ''
-    const total = parseInt(totalStr, 10) || asset.size
-
-    sendProgress(10, `开始下载（共 ${(total / 1024 / 1024).toFixed(2)} MB）...`)
-
-    // Node stream 写入文件
-    const fileStream = fs.createWriteStream(partialPath, { flags: 'w' })
-    const reader = Readable.fromWeb(resp.body as any)
-
-    let received = 0
-    let lastPct = 10
-    // 下载超时保护：5 分钟无新数据则中止
-    let downloadTimer: NodeJS.Timeout | null = setTimeout(() => {
-      try { reader.destroy(new Error('下载超时')) } catch {}
-    }, DOWNLOAD_TIMEOUT_MS)
-
-    await new Promise<void>((resolve, reject) => {
-      let chunkIndex = 0
-      reader.on('data', (chunk: Buffer) => {
-        // 收到数据就重置超时
-        if (downloadTimer) clearTimeout(downloadTimer)
-        downloadTimer = setTimeout(() => {
-          try { reader.destroy(new Error('下载超时')) } catch {}
-        }, 30_000) // 30 秒无数据则超时
-
-        received += chunk.length
-        fileStream.write(chunk)
-        chunkIndex++
-        if (total > 0) {
-          // 下载部分占 10%-95%，留 5% 给"完成"动画
-          const pct = 10 + Math.floor((received / total) * 85)
-          if (pct > lastPct || chunkIndex % 50 === 0) {
-            lastPct = pct
-            const mb = (received / 1024 / 1024).toFixed(2)
-            const totalMb = (total / 1024 / 1024).toFixed(2)
-            sendProgress(pct, `下载中 ${mb}/${totalMb} MB (${pct}%)`)
-          }
-        } else if (chunkIndex % 50 === 0) {
-          const mb = (received / 1024 / 1024).toFixed(2)
-          sendProgress(Math.min(90, 10 + Math.floor(received / 1024 / 10)), `下载中 ${mb} MB`)
-        }
-      })
-      reader.on('end', () => {
-        if (downloadTimer) clearTimeout(downloadTimer)
-        fileStream.end(() => {
-          // 下载完成后还需要校验，不能提前显示 100%。
-          sendProgress(95, '下载完成，正在准备校验...')
-          resolve()
-        })
-      })
-      reader.on('error', (err: any) => {
-        if (downloadTimer) clearTimeout(downloadTimer)
-        fileStream.destroy()
-        reject(err)
-      })
-      fileStream.on('error', (err: any) => {
-        if (downloadTimer) clearTimeout(downloadTimer)
-        reject(err)
-      })
-    })
-
     // 验证文件大小
-    const stat = fs.statSync(partialPath)
+    const verifyPath = fs.existsSync(savePath) ? savePath : partialPath
+    const stat = fs.statSync(verifyPath)
     if (stat.size !== asset.size) throw new Error(`下载文件大小不匹配：应为 ${asset.size}，实际为 ${stat.size}`)
     sendProgress(96, '正在校验安装包完整性...')
-    const actualChecksum = await sha256File(partialPath)
+    const actualChecksum = await sha256File(verifyPath)
     if (actualChecksum !== expectedChecksum) throw new Error('安装包 SHA-256 校验失败，文件可能损坏或被篡改')
-    if (fs.existsSync(savePath)) fs.rmSync(savePath, { force: true })
-    fs.renameSync(partialPath, savePath)
+    if (verifyPath === partialPath) {
+      if (fs.existsSync(savePath)) fs.rmSync(savePath, { force: true })
+      fs.renameSync(partialPath, savePath)
+    }
     partialPath = ''
 
     // 安装包：用 NSIS /S 静默安装，自动覆盖旧文件
