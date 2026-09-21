@@ -181,6 +181,8 @@ export interface AppSettings {
   theme: 'light' | 'dark'
   fontSize: number
   editorFont: string
+  /** 应用界面字体，与正文编辑字体分开设置。 */
+  uiFont?: string
   autoSaveInterval: number
   dataDir: string
   // 联网搜索配置

@@ -245,6 +245,7 @@ export function registerStoreIPC() {
         theme: 'light',
         fontSize: 16,
         editorFont: '思源宋体, 宋体, serif',
+        uiFont: 'Segoe UI, PingFang SC, Microsoft YaHei, sans-serif',
         autoSaveInterval: 30,
         dataDir: '',
         searchProvider: 'duckduckgo',
@@ -290,6 +291,10 @@ export function registerStoreIPC() {
     }
     if (db.data.settings && db.data.settings.zoomLevel === undefined) {
       db.data.settings.zoomLevel = 100
+      settingsChanged = true
+    }
+    if (db.data.settings && !db.data.settings.uiFont) {
+      db.data.settings.uiFont = 'Segoe UI, PingFang SC, Microsoft YaHei, sans-serif'
       settingsChanged = true
     }
     if (db.data.settings && db.data.settings.askMode === undefined) {

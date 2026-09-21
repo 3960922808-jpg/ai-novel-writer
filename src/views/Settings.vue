@@ -64,14 +64,37 @@
           </div>
         </el-form-item>
 
-        <el-form-item label="编辑器字体">
-          <el-select v-model="form.editorFont" style="width: 100%" @change="onFontChange">
-            <el-option label="思源宋体" value="思源宋体" />
-            <el-option label="思源黑体" value="思源黑体" />
-            <el-option label="微软雅黑" value="微软雅黑" />
-            <el-option label="宋体" value="宋体" />
-            <el-option label="楷体" value="楷体" />
+        <el-form-item label="界面字体">
+          <el-select v-model="form.uiFont" filterable allow-create default-first-option style="width: 100%" @change="onFontChange">
+            <el-option v-for="font in uiFontPresets" :key="font.value" :label="font.label" :value="font.value">
+              <span :style="{ fontFamily: font.value }">{{ font.label }}</span>
+            </el-option>
           </el-select>
+          <span class="text-faint text-xs font-help">控制菜单、按钮和设置页面；也可以直接输入电脑中已安装的字体名称</span>
+        </el-form-item>
+
+        <el-form-item label="正文写作字体">
+          <div class="font-picker">
+            <el-select v-model="form.editorFont" filterable allow-create default-first-option style="width: 100%" @change="onFontChange">
+              <el-option v-for="font in editorFontPresets" :key="font.value" :label="font.label" :value="font.value">
+                <span :style="{ fontFamily: font.value }">{{ font.label }} · 山雨欲来，故事未完</span>
+              </el-option>
+            </el-select>
+            <div class="font-preview-grid">
+              <button
+                v-for="font in editorFontPresets.slice(0, 8)"
+                :key="font.value"
+                type="button"
+                class="font-preview-card"
+                :class="{ active: form.editorFont === font.value }"
+                :style="{ fontFamily: font.value }"
+                @click="selectEditorFont(font.value)"
+              ><strong>故事</strong><span>{{ font.label }}</span></button>
+            </div>
+            <div class="font-sample" :style="{ fontFamily: form.editorFont }">
+              夜色落在窗沿，远处的灯一盏接一盏亮起来。她合上书，知道故事才刚刚开始。
+            </div>
+          </div>
         </el-form-item>
 
         <el-form-item label="界面缩放">
@@ -589,6 +612,7 @@ const form = reactive<AppSettings>({
   themeMode: 'light',
   fontSize: 14,
   editorFont: '思源宋体',
+  uiFont: 'Segoe UI, PingFang SC, Microsoft YaHei, sans-serif',
   autoSaveInterval: 30,
   dataDir: '',
   searchProvider: 'duckduckgo',
@@ -643,6 +667,28 @@ const accentPresets = [
   { label: '玫瑰粉', value: '#c96f91' },
   { label: '暖杏橙', value: '#c9854f' },
   { label: '朱砂红', value: '#bd5b5b' }
+]
+const uiFontPresets = [
+  { label: '现代简洁', value: 'Segoe UI, PingFang SC, Microsoft YaHei, sans-serif' },
+  { label: '思源黑体', value: 'Source Han Sans SC, 思源黑体, Microsoft YaHei, sans-serif' },
+  { label: 'HarmonyOS Sans', value: 'HarmonyOS Sans SC, Microsoft YaHei, sans-serif' },
+  { label: '阿里巴巴普惠体', value: 'Alibaba PuHuiTi, Microsoft YaHei, sans-serif' },
+  { label: '系统等线', value: 'DengXian, 等线, Microsoft YaHei, sans-serif' },
+  { label: '文雅宋体界面', value: 'Source Han Serif SC, 思源宋体, SimSun, serif' }
+]
+const editorFontPresets = [
+  { label: '思源宋体', value: 'Source Han Serif SC, 思源宋体, SimSun, serif' },
+  { label: '霞鹜文楷', value: 'LXGW WenKai, 霞鹜文楷, KaiTi, serif' },
+  { label: '方正书宋', value: 'FZShuSong-Z01, 方正书宋, SimSun, serif' },
+  { label: '楷体', value: 'KaiTi, STKaiti, 楷体, serif' },
+  { label: '仿宋', value: 'FangSong, STFangsong, 仿宋, serif' },
+  { label: '宋体', value: 'SimSun, 宋体, serif' },
+  { label: '思源黑体', value: 'Source Han Sans SC, 思源黑体, Microsoft YaHei, sans-serif' },
+  { label: '微软雅黑', value: 'Microsoft YaHei, 微软雅黑, sans-serif' },
+  { label: '等线', value: 'DengXian, 等线, sans-serif' },
+  { label: '苹方', value: 'PingFang SC, 苹方, Microsoft YaHei, sans-serif' },
+  { label: 'HarmonyOS Sans', value: 'HarmonyOS Sans SC, Microsoft YaHei, sans-serif' },
+  { label: '阿里巴巴普惠体', value: 'Alibaba PuHuiTi, Microsoft YaHei, sans-serif' }
 ]
 const wallpaperFitOptions = [
   { label: '铺满', value: 'cover' },
@@ -978,6 +1024,7 @@ function fillForm(s: AppSettings) {
   if (!form.themeMode) {
     form.themeMode = form.theme === 'dark' ? 'dark' : 'light'
   }
+  if (!form.uiFont) form.uiFont = 'Segoe UI, PingFang SC, Microsoft YaHei, sans-serif'
   // askMode 兼容
   if (!form.askMode) form.askMode = 'auto'
   // zoomLevel 兼容
@@ -1056,8 +1103,12 @@ function onAccentCommit(color: string | null) {
 }
 
 function onFontChange() {
-  // 字体大小/编辑器字体实时预览
-  settingsStore.update({ fontSize: form.fontSize, editorFont: form.editorFont })
+  settingsStore.update({ fontSize: form.fontSize, editorFont: form.editorFont, uiFont: form.uiFont })
+}
+
+function selectEditorFont(value: string) {
+  form.editorFont = value
+  onFontChange()
 }
 
 function onZoomChange() {
@@ -1255,6 +1306,7 @@ async function save() {
       themeMode: form.themeMode,
       fontSize: form.fontSize,
       editorFont: form.editorFont,
+      uiFont: form.uiFont,
       autoSaveInterval: form.autoSaveInterval,
       dataDir: form.dataDir,
       searchProvider: form.searchProvider,
@@ -1527,6 +1579,16 @@ html.dark .preview-body { background: rgba(30,41,59,var(--preview-panel-opacity)
   margin-bottom: 14px;
   background: var(--panel-2);
 }
+.font-help { display: block; margin-top: 5px; }
+.font-picker { width: 100%; }
+.font-preview-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.font-preview-card { display: flex; min-width: 0; min-height: 65px; align-items: flex-start; justify-content: center; flex-direction: column; padding: 9px 11px; border: 1px solid var(--border); border-radius: 14px; color: var(--text); background: var(--panel-2); cursor: pointer; transition: border-color .18s ease, background .18s ease, transform .18s ease; }
+.font-preview-card:hover { border-color: color-mix(in srgb, var(--primary) 36%, var(--border)); transform: translateY(-1px); }
+.font-preview-card.active { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--panel)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 10%, transparent); }
+.font-preview-card strong { font-size: 19px; font-weight: 500; }
+.font-preview-card span { width: 100%; margin-top: 3px; overflow: hidden; color: var(--text-3); font-family: var(--ui-font); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.font-sample { margin-top: 10px; padding: 14px 16px; border: 1px dashed var(--border); border-radius: 15px; color: var(--text-2); background: var(--panel); font-size: 15px; line-height: 1.9; }
+@media (max-width: 760px) { .font-preview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .public-model-notice {
   display: flex;
   align-items: center;

@@ -75,8 +75,20 @@
     </div>
 
     <div class="canvas-wrap card">
+      <div class="canvas-tools">
+        <el-input v-model="canvasQuery" clearable :prefix-icon="Search" size="small" placeholder="搜索节点" @keyup.enter="locateFirstMatch" />
+        <span class="tool-sep"></span>
+        <el-button circle size="small" :icon="RefreshLeft" title="撤销布局" :disabled="layoutHistory.length === 0" @click="undoLayout" />
+        <el-button circle size="small" :icon="RefreshRight" title="恢复布局" :disabled="layoutRedo.length === 0" @click="redoLayout" />
+        <el-button circle size="small" :icon="Rank" title="自动整理布局" :disabled="nodes.length === 0" @click="autoLayout" />
+        <el-button circle size="small" :icon="FullScreen" title="适配全部节点" :disabled="nodes.length === 0" @click="fitAllNodes" />
+        <span class="tool-sep"></span>
+        <el-button circle size="small" :icon="ZoomOut" title="缩小" @click="setCanvasScale(canvasScale - .1)" />
+        <button class="zoom-value" title="恢复 100%" @click="setCanvasScale(1)">{{ Math.round(canvasScale * 100) }}%</button>
+        <el-button circle size="small" :icon="ZoomIn" title="放大" @click="setCanvasScale(canvasScale + .1)" />
+      </div>
       <div class="canvas-area" ref="canvasRef" @mousemove="onCanvasMouseMove" @mouseup="onCanvasMouseUp">
-        <div class="canvas-inner" :style="{ width: CANVAS_W + 'px', height: CANVAS_H + 'px' }">
+        <div class="canvas-inner" :style="{ width: CANVAS_W + 'px', height: CANVAS_H + 'px', zoom: canvasScale }">
           <svg class="links-svg" :width="CANVAS_W" :height="CANVAS_H">
             <!-- 已有连线 -->
             <path
@@ -103,7 +115,7 @@
             v-for="node in nodes"
             :key="node.id"
             class="node-circle"
-            :class="[typeClass(node.type), { 'connect-mode': connectMode, 'drop-target': dragFrom && dragFrom.nodeId !== node.id && hoverNodeId === node.id, 'is-workflow': isWorkflowType(node.type) }]"
+            :class="[typeClass(node.type), { 'connect-mode': connectMode, 'drop-target': dragFrom && dragFrom.nodeId !== node.id && hoverNodeId === node.id, 'is-workflow': isWorkflowType(node.type), 'search-match': canvasQuery && nodeMatches(node), 'search-dim': canvasQuery && !nodeMatches(node) }]"
             :style="nodeStyle(node)"
             @mousedown.left="startDrag($event, node)"
             @dblclick="edit(node)"
@@ -206,6 +218,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button @click="duplicateCurrentNode">复制节点</el-button>
         <el-button type="primary" @click="save">保存</el-button>
       </template>
     </el-dialog>
@@ -279,12 +292,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, reactive, watch, onBeforeUnmount, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus, Close, Connection, ArrowDown, ArrowRight, DocumentChecked, InfoFilled,
-  ArrowLeft, MagicStick, Download, Share, DocumentCopy, Check, Delete, ChatDotRound
+  ArrowLeft, MagicStick, Download, Share, DocumentCopy, Check, Delete, ChatDotRound,
+  Search, ZoomIn, ZoomOut, FullScreen, Rank, RefreshLeft, RefreshRight
 } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { useSettingsStore } from '@/stores/settings'
@@ -303,6 +317,11 @@ const CANVAS_H = 2000
 
 const nodes = ref<CanvasNode[]>([])
 const canvasRef = ref<HTMLElement | null>(null)
+const canvasScale = ref(1)
+const canvasQuery = ref('')
+type LayoutSnapshot = Record<string, { x: number; y: number }>
+const layoutHistory = ref<LayoutSnapshot[]>([])
+const layoutRedo = ref<LayoutSnapshot[]>([])
 let cleanupNodeDrag: (() => void) | null = null
 const dialogVisible = ref(false)
 
@@ -484,6 +503,85 @@ function shortContent(content: string, maxLen = 60) {
   return text.length > maxLen ? text.slice(0, maxLen) + '...' : text
 }
 
+function nodeMatches(node: CanvasNode) {
+  const query = canvasQuery.value.trim().toLowerCase()
+  return !query || [node.title, node.content, node.aiPrompt, typeLabel(node.type)]
+    .some(value => (value || '').toLowerCase().includes(query))
+}
+
+function setCanvasScale(value: number) {
+  canvasScale.value = Math.max(.5, Math.min(1.8, Math.round(value * 10) / 10))
+}
+
+function locateFirstMatch() {
+  const node = nodes.value.find(nodeMatches)
+  const canvas = canvasRef.value
+  if (!node || !canvas) {
+    if (canvasQuery.value.trim()) ElMessage.info('没有找到匹配节点')
+    return
+  }
+  canvas.scrollTo({ left: Math.max(0, (node.x + node.width / 2) * canvasScale.value - canvas.clientWidth / 2), top: Math.max(0, (node.y + node.height / 2) * canvasScale.value - canvas.clientHeight / 2), behavior: 'smooth' })
+}
+
+function currentLayout(): LayoutSnapshot {
+  return Object.fromEntries(nodes.value.map(node => [node.id, { x: node.x, y: node.y }]))
+}
+
+function pushLayoutSnapshot() {
+  layoutHistory.value.push(currentLayout())
+  if (layoutHistory.value.length > 30) layoutHistory.value.shift()
+  layoutRedo.value = []
+}
+
+async function applyLayout(snapshot: LayoutSnapshot) {
+  for (const node of nodes.value) {
+    const position = snapshot[node.id]
+    if (position) Object.assign(node, position)
+  }
+  await saveAll(false)
+}
+
+async function undoLayout() {
+  const snapshot = layoutHistory.value.pop()
+  if (!snapshot) return
+  layoutRedo.value.push(currentLayout())
+  await applyLayout(snapshot)
+}
+
+async function redoLayout() {
+  const snapshot = layoutRedo.value.pop()
+  if (!snapshot) return
+  layoutHistory.value.push(currentLayout())
+  await applyLayout(snapshot)
+}
+
+async function autoLayout() {
+  if (!nodes.value.length) return
+  pushLayoutSnapshot()
+  const workflow = workflowNodes.value
+  workflow.forEach((node, index) => { node.x = 140 + index * 190; node.y = 220 })
+  nodes.value.filter(node => !workflow.includes(node)).forEach((node, index) => {
+    node.x = 140 + (index % 6) * 170
+    node.y = 470 + Math.floor(index / 6) * 170
+  })
+  await saveAll(false)
+  await nextTick()
+  fitAllNodes()
+  ElMessage.success('画布已自动整理，可用撤销按钮恢复原布局')
+}
+
+function fitAllNodes() {
+  const canvas = canvasRef.value
+  if (!canvas || !nodes.value.length) return
+  const minX = Math.min(...nodes.value.map(node => node.x))
+  const minY = Math.min(...nodes.value.map(node => node.y))
+  const maxX = Math.max(...nodes.value.map(node => node.x + node.width))
+  const maxY = Math.max(...nodes.value.map(node => node.y + node.height))
+  const scale = Math.min(1.35, Math.max(.5, Math.min((canvas.clientWidth - 140) / (maxX - minX + 180), (canvas.clientHeight - 140) / (maxY - minY + 180))))
+  canvasScale.value = Math.round(scale * 10) / 10
+  nextTick(() => canvas.scrollTo({ left: Math.max(0, minX * canvasScale.value - 60), top: Math.max(0, minY * canvasScale.value - 70), behavior: 'smooth' }))
+}
+
 function otherNodes(currentId?: ID) {
   return nodes.value.filter(n => n.id !== currentId)
 }
@@ -541,8 +639,8 @@ function toCanvasCoord(clientX: number, clientY: number) {
   const scrollLeft = canvas.scrollLeft
   const scrollTop = canvas.scrollTop
   return {
-    x: clientX - rect.left + scrollLeft,
-    y: clientY - rect.top + scrollTop
+    x: (clientX - rect.left + scrollLeft) / canvasScale.value,
+    y: (clientY - rect.top + scrollTop) / canvasScale.value
   }
 }
 
@@ -552,13 +650,17 @@ function startDrag(e: MouseEvent, node: CanvasNode) {
   if (target.closest('.node-del')) return
   if (target.closest('.node-dot')) return
   e.preventDefault()
-  const startX = e.clientX - node.x
-  const startY = e.clientY - node.y
+  const startX = e.clientX
+  const startY = e.clientY
+  const nodeStartX = node.x
+  const nodeStartY = node.y
   let moved = false
+  let captured = false
   const onMove = (ev: MouseEvent) => {
     moved = true
-    node.x = Math.max(0, ev.clientX - startX)
-    node.y = Math.max(0, ev.clientY - startY)
+    if (!captured) { pushLayoutSnapshot(); captured = true }
+    node.x = Math.max(0, nodeStartX + (ev.clientX - startX) / canvasScale.value)
+    node.y = Math.max(0, nodeStartY + (ev.clientY - startY) / canvasScale.value)
   }
   cleanupNodeDrag?.()
   const cleanup = () => {
@@ -582,7 +684,18 @@ function startDrag(e: MouseEvent, node: CanvasNode) {
   cleanupNodeDrag = cleanup
 }
 
+function handleCanvasShortcut(event: KeyboardEvent) {
+  if (!event.ctrlKey) return
+  if (event.key === '+' || event.key === '=') { event.preventDefault(); setCanvasScale(canvasScale.value + .1) }
+  else if (event.key === '-') { event.preventDefault(); setCanvasScale(canvasScale.value - .1) }
+  else if (event.key === '0') { event.preventDefault(); setCanvasScale(1) }
+  else if (event.shiftKey && event.key.toLowerCase() === 'l') { event.preventDefault(); autoLayout() }
+}
+
+onMounted(() => window.addEventListener('keydown', handleCanvasShortcut))
+
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleCanvasShortcut)
   cleanupNodeDrag?.()
   dragFrom.value = null
   dragLine.value = ''
@@ -666,7 +779,10 @@ async function onCanvasMouseUp(e: MouseEvent) {
 async function addNode(type: CanvasNode['type']) {
   if (!project.value) return
   try {
-    const offset = (nodes.value.length % 10) * 30
+    const offset = (nodes.value.length % 6) * 24
+    const canvas = canvasRef.value
+    const visibleX = canvas ? (canvas.scrollLeft + canvas.clientWidth / 2) / canvasScale.value : 160
+    const visibleY = canvas ? (canvas.scrollTop + canvas.clientHeight / 2) / canvasScale.value : 160
     // 工作流类型自动设 order：同类型按已有数量 +1
     let order = 0
     if (isWorkflowType(type)) {
@@ -675,8 +791,8 @@ async function addNode(type: CanvasNode['type']) {
     const node = await db.Canvas.save({
       projectId: project.value.id,
       type,
-      x: 80 + offset,
-      y: 80 + offset,
+      x: Math.max(40, visibleX - 40 + offset),
+      y: Math.max(40, visibleY - 40 + offset),
       width: 80,
       height: 80,
       title: `新${TYPE_LABELS[type]}`,
@@ -743,6 +859,30 @@ async function saveAll(showSuccess = true): Promise<boolean> {
   } catch (e: any) {
     ElMessage.error('保存失败：' + e.message)
     return false
+  }
+}
+
+async function duplicateCurrentNode() {
+  if (!project.value || !form.id) return
+  const source = nodes.value.find(node => node.id === form.id)
+  if (!source) return
+  try {
+    const copy = await db.Canvas.save({
+      ...toPlain(source),
+      id: undefined,
+      projectId: project.value.id,
+      x: source.x + 36,
+      y: source.y + 36,
+      title: `${source.title || typeLabel(source.type)} · 副本`,
+      links: [],
+      createdAt: Date.now()
+    } as any)
+    nodes.value.push(copy)
+    dialogVisible.value = false
+    edit(copy)
+    ElMessage.success('已复制节点')
+  } catch (e: any) {
+    ElMessage.error('复制失败：' + e.message)
   }
 }
 
@@ -856,6 +996,7 @@ async function insertWorkflowTemplate() {
     }
   }
   try {
+    const inserted: CanvasNode[] = []
     for (const tpl of WORKFLOW_TEMPLATES) {
       const order = nodes.value.filter(n => n.type === tpl.type).length
       const node = await db.Canvas.save({
@@ -874,8 +1015,13 @@ async function insertWorkflowTemplate() {
         createdAt: Date.now()
       } as any)
       nodes.value.push(node)
+      inserted.push(node)
     }
-    ElMessage.success('已插入 5 个工作流节点，请逐个编辑 AI 提示词')
+    for (let index = 0; index < inserted.length - 1; index++) {
+      inserted[index].links = [...new Set([...(inserted[index].links || []), inserted[index + 1].id])]
+      await db.Canvas.save(toPlain(inserted[index]))
+    }
+    ElMessage.success('已插入并连好 5 个工作流节点，请逐个完善提示词')
   } catch (e: any) {
     ElMessage.error('插入失败：' + e.message)
   }
@@ -1131,6 +1277,30 @@ async function copyGenerated() {
   min-height: 0;
   padding: 0;
 }
+.canvas-tools {
+  position: absolute;
+  z-index: 20;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  box-shadow: 0 10px 30px rgba(30, 41, 59, .1);
+  backdrop-filter: blur(18px);
+}
+.canvas-tools :deep(.el-input) { width: 178px; }
+.canvas-tools :deep(.el-input__wrapper) { border-radius: 12px; }
+.tool-sep { width: 1px; height: 20px; margin: 0 2px; background: var(--border); }
+.zoom-value { min-width: 45px; padding: 4px 5px; border: 0; border-radius: 9px; color: var(--text-2); background: transparent; font-size: 11px; font-variant-numeric: tabular-nums; cursor: pointer; }
+.zoom-value:hover { color: var(--primary); background: var(--panel-2); }
+@media (max-width: 900px) {
+  .canvas-tools { left: 10px; right: 10px; overflow-x: auto; }
+  .canvas-tools :deep(.el-input) { min-width: 145px; }
+}
 .canvas-area {
   width: 100%;
   height: 100%;
@@ -1172,6 +1342,8 @@ async function copyGenerated() {
   transform: scale(1.1) translateY(-2px);
   border-width: 3px;
 }
+.node-circle.search-match { box-shadow: 0 0 0 5px color-mix(in srgb, var(--primary) 22%, transparent), 0 10px 28px rgba(0,0,0,.15); transform: scale(1.08); }
+.node-circle.search-dim { opacity: .28; filter: grayscale(.35); }
 .node-circle:active {
   cursor: grabbing;
   transform: scale(1.05);

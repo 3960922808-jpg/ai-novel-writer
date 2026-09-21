@@ -46,6 +46,11 @@ export const useSettingsStore = defineStore('settings', () => {
       // 应用字体大小
       if (settings.value) {
         document.documentElement.style.fontSize = `${settings.value.fontSize}px`
+        const uiFont = settings.value.uiFont || 'Segoe UI, PingFang SC, Microsoft YaHei, sans-serif'
+        document.documentElement.style.setProperty('--ui-font', uiFont)
+        document.documentElement.style.setProperty('--el-font-family', uiFont)
+        document.documentElement.style.fontFamily = uiFont
+        document.body.style.fontFamily = uiFont
       }
       // 应用界面缩放（使用 Electron 原生 webFrame，避免 CSS zoom 导致 teleported popper 错位）
       if (settings.value) {
